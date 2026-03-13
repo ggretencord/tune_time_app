@@ -1,0 +1,22 @@
+{
+  "name": "tune_time_app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c blue,green \"npm --workspace backend run dev\" \"npm --workspace frontend run dev\"",
+    "backend": "npm --workspace backend run dev",
+    "frontend": "npm --workspace frontend run dev",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
