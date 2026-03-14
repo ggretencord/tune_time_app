@@ -28,6 +28,9 @@ type SocialUser = {
   name: string
   handle: string
   bio: string
+  age: number | null
+  matchOpen: boolean
+  isMatched: boolean
   likedMusic: Track[]
   isFollowing: boolean
 }
@@ -40,28 +43,147 @@ type ChatMessage = {
   sentAt: number
 }
 
+type ViewerAccount = {
+  id: string
+  name: string
+  handle: string
+  bio: string
+  age: number
+  matchOpen: boolean
+}
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-const VIEWER_ID = 'you'
 
 function App() {
-  const [step, setStep] = useState<'survey' | 'feed'>('survey')
+  const [step, setStep] = useState<'account' | 'survey' | 'feed'>('account')
+  const [viewer, setViewer] = useState<ViewerAccount | null>(null)
 
   return (
     <div className="app-root">
-      {step === 'survey' ? (
-        <SurveyScreen onDone={() => setStep('feed')} />
+      {step === 'account' ? (
+        <AccountScreen
+          onCreated={(user) => {
+            setViewer(user)
+            setStep('survey')
+          }}
+        />
+      ) : step === 'survey' && viewer ? (
+        <SurveyScreen viewerId={viewer.id} onDone={() => setStep('feed')} />
       ) : (
-        <FeedScreen />
+        viewer && <FeedScreen viewer={viewer} onViewerUpdate={setViewer} />
       )}
     </div>
   )
 }
 
+type AccountScreenProps = {
+  onCreated: (user: ViewerAccount) => void
+}
+
+function AccountScreen({ onCreated }: AccountScreenProps) {
+  const [name, setName] = useState('')
+  const [handle, setHandle] = useState('')
+  const [bio, setBio] = useState('')
+  const [birthday, setBirthday] = useState('')
+  const [matchOpen, setMatchOpen] = useState(true)
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleCreateAccount(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    if (!name.trim() || !handle.trim() || !birthday) {
+      setError('Name, handle, and birthday are required.')
+      return
+    }
+    setCreating(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/account/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          handle: handle.trim(),
+          bio: bio.trim(),
+          birthday,
+          matchOpen,
+        }),
+      })
+      const data = (await res.json()) as { error?: string; user?: ViewerAccount }
+      if (!res.ok || !data.user) {
+        throw new Error(data.error || 'Could not create account')
+      }
+      onCreated(data.user)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not create account'
+      setError(message)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <div className="screen survey-screen">
+      <header className="top-bar">
+        <span className="brand">Tune Time</span>
+        <span className="pill">Create account</span>
+      </header>
+      <main className="content">
+        <h1 className="title">Create your account</h1>
+        <p className="subtitle">Birthday is required. Only followers can see your age, never your birthday.</p>
+        <form className="account-form" onSubmit={handleCreateAccount}>
+          <label className="field-label">
+            Name
+            <input className="search-input field-input" value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label className="field-label">
+            Handle
+            <input
+              className="search-input field-input"
+              value={handle}
+              onChange={(e) => setHandle(e.target.value)}
+              placeholder="your_handle"
+            />
+          </label>
+          <label className="field-label">
+            Bio (optional)
+            <input className="search-input field-input" value={bio} onChange={(e) => setBio(e.target.value)} />
+          </label>
+          <label className="field-label">
+            Birthday
+            <input
+              className="search-input field-input"
+              value={birthday}
+              onChange={(e) => setBirthday(e.target.value)}
+              type="date"
+            />
+          </label>
+          <label className="toggle-row">
+            <span>Match mode</span>
+            <button
+              className={matchOpen ? 'like-btn' : 'pass-btn'}
+              type="button"
+              onClick={() => setMatchOpen((prev) => !prev)}
+            >
+              {matchOpen ? 'Open (can match)' : 'Closed (just listen)'}
+            </button>
+          </label>
+          {error && <p className="error-text">{error}</p>}
+          <button className="primary-btn primary-btn-wide" type="submit" disabled={creating}>
+            {creating ? 'Creating...' : 'Continue'}
+          </button>
+        </form>
+      </main>
+    </div>
+  )
+}
+
 type SurveyProps = {
+  viewerId: string
   onDone: () => void
 }
 
-function SurveyScreen({ onDone }: SurveyProps) {
+function SurveyScreen({ viewerId, onDone }: SurveyProps) {
   const [query, setQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Track[]>([])
   const [loading, setLoading] = useState(false)
@@ -114,7 +236,7 @@ function SurveyScreen({ onDone }: SurveyProps) {
       const res = await fetch(`${API_BASE}/api/survey`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ seeds: selected, moods }),
+        body: JSON.stringify({ userId: viewerId, seeds: selected, moods }),
       })
       if (!res.ok) {
         throw new Error('Survey submit failed')
@@ -227,7 +349,12 @@ function SurveyScreen({ onDone }: SurveyProps) {
   )
 }
 
-function FeedScreen() {
+type FeedScreenProps = {
+  viewer: ViewerAccount
+  onViewerUpdate: (next: ViewerAccount) => void
+}
+
+function FeedScreen({ viewer, onViewerUpdate }: FeedScreenProps) {
   const [items, setItems] = useState<Track[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -271,7 +398,7 @@ function FeedScreen() {
     async function loadSocialUsers() {
       setSocialError(null)
       try {
-        const res = await fetch(`${API_BASE}/api/social/users?viewerId=${VIEWER_ID}`)
+        const res = await fetch(`${API_BASE}/api/social/users?viewerId=${viewer.id}`)
         if (!res.ok) throw new Error('Social load failed')
         const data = (await res.json()) as { users: SocialUser[] }
         setSocialUsers(data.users)
@@ -285,7 +412,7 @@ function FeedScreen() {
 
     loadFeed()
     loadSocialUsers()
-  }, [])
+  }, [viewer.id])
 
   useEffect(() => {
     if (!selectedUserId) return
@@ -293,7 +420,7 @@ function FeedScreen() {
     async function loadMessages() {
       try {
         const res = await fetch(
-          `${API_BASE}/api/social/messages?viewerId=${VIEWER_ID}&withUserId=${selectedUserId}`,
+          `${API_BASE}/api/social/messages?viewerId=${viewer.id}&withUserId=${selectedUserId}`,
         )
         if (!res.ok) throw new Error('Chat load failed')
         const data = (await res.json()) as { messages: ChatMessage[] }
@@ -304,7 +431,7 @@ function FeedScreen() {
     }
 
     loadMessages()
-  }, [selectedUserId])
+  }, [selectedUserId, viewer.id])
 
   useEffect(() => {
     if (!audioRef.current) {
@@ -390,7 +517,7 @@ function FeedScreen() {
       fetch(`${API_BASE}/api/social/like`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: VIEWER_ID, track: currentTrack }),
+        body: JSON.stringify({ userId: viewer.id, track: currentTrack }),
       }).catch(() => {})
     } else {
       setDislikedCount((prev) => prev + 1)
@@ -400,22 +527,26 @@ function FeedScreen() {
   }
 
   async function handleFollowToggle(user: SocialUser) {
+    if (!viewer.matchOpen) {
+      setSocialError('Your match mode is closed. Open it to follow and match.')
+      return
+    }
     try {
       const res = await fetch(`${API_BASE}/api/social/follow`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          viewerId: VIEWER_ID,
+          viewerId: viewer.id,
           targetId: user.id,
           action: user.isFollowing ? 'unfollow' : 'follow',
         }),
       })
       if (!res.ok) throw new Error('follow failed')
-      const data = (await res.json()) as { isFollowing: boolean }
+      const data = (await res.json()) as { isFollowing: boolean; isMatched: boolean }
       setSocialUsers((prev) =>
         prev.map((candidate) =>
           candidate.id === user.id
-            ? { ...candidate, isFollowing: data.isFollowing }
+            ? { ...candidate, isFollowing: data.isFollowing, isMatched: data.isMatched }
             : candidate,
         ),
       )
@@ -427,12 +558,16 @@ function FeedScreen() {
   async function handleSendMessage(e: React.FormEvent) {
     e.preventDefault()
     if (!selectedUser || !chatInput.trim()) return
+    if (!viewer.matchOpen || !selectedUser.isMatched) {
+      setSocialError('Messaging is available only when you are matched and match mode is open.')
+      return
+    }
     try {
       const res = await fetch(`${API_BASE}/api/social/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          fromId: VIEWER_ID,
+          fromId: viewer.id,
           toId: selectedUser.id,
           text: chatInput.trim(),
         }),
@@ -443,6 +578,22 @@ function FeedScreen() {
       setChatInput('')
     } catch {
       setSocialError('Could not send your message.')
+    }
+  }
+
+  async function handleMatchModeToggle() {
+    try {
+      const nextMatchOpen = !viewer.matchOpen
+      const res = await fetch(`${API_BASE}/api/account/match-mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: viewer.id, matchOpen: nextMatchOpen }),
+      })
+      if (!res.ok) throw new Error('mode update failed')
+      const data = (await res.json()) as { matchOpen: boolean }
+      onViewerUpdate({ ...viewer, matchOpen: data.matchOpen })
+    } catch {
+      setSocialError('Could not update your match mode.')
     }
   }
 
@@ -585,6 +736,21 @@ function FeedScreen() {
       {tab === 'community' && (
         <main className="community-main">
           {socialError && <p className="error-text">{socialError}</p>}
+          <section className="selected-user-card">
+            <div>
+              <h3>@{viewer.handle}</h3>
+              <p className="song-artist">
+                Match mode: {viewer.matchOpen ? 'Open (you can match)' : 'Closed (just listening)'}
+              </p>
+            </div>
+            <button
+              className={viewer.matchOpen ? 'like-btn' : 'pass-btn'}
+              type="button"
+              onClick={handleMatchModeToggle}
+            >
+              {viewer.matchOpen ? 'Set Closed' : 'Set Open'}
+            </button>
+          </section>
           <section className="community-users">
             <h2 className="panel-title">People</h2>
             <div className="list">
@@ -613,11 +779,21 @@ function FeedScreen() {
                 <div>
                   <h3>{selectedUser.name}</h3>
                   <p className="song-artist">@{selectedUser.handle}</p>
+                  <p className="song-artist">
+                    {selectedUser.age === null
+                      ? 'Age visible to followers only'
+                      : `Age: ${selectedUser.age}`}
+                  </p>
+                  <p className="song-artist">
+                    Match mode: {selectedUser.matchOpen ? 'Open' : 'Closed'}
+                    {selectedUser.isMatched ? ' · Matched' : ''}
+                  </p>
                 </div>
                 <button
                   className={selectedUser.isFollowing ? 'pass-btn' : 'like-btn'}
                   type="button"
                   onClick={() => handleFollowToggle(selectedUser)}
+                  disabled={!viewer.matchOpen}
                 >
                   {selectedUser.isFollowing ? 'Following' : 'Follow'}
                 </button>
@@ -653,7 +829,7 @@ function FeedScreen() {
                     messages.map((message) => (
                       <p
                         key={message.id}
-                        className={`chat-bubble ${message.fromId === VIEWER_ID ? 'chat-me' : 'chat-them'}`}
+                        className={`chat-bubble ${message.fromId === viewer.id ? 'chat-me' : 'chat-them'}`}
                       >
                         {message.text}
                       </p>
@@ -666,8 +842,13 @@ function FeedScreen() {
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                     placeholder="Type a message"
+                    disabled={!viewer.matchOpen || !selectedUser.isMatched}
                   />
-                  <button className="primary-btn" type="submit">
+                  <button
+                    className="primary-btn"
+                    type="submit"
+                    disabled={!viewer.matchOpen || !selectedUser.isMatched}
+                  >
                     Send
                   </button>
                 </form>

@@ -20,6 +20,8 @@ const socialProfiles = new Map([
       name: 'You',
       handle: 'you',
       bio: 'Building the perfect soundtrack.',
+      birthday: '1999-06-15',
+      matchOpen: true,
     },
   ],
   [
@@ -29,6 +31,8 @@ const socialProfiles = new Map([
       name: 'Ava Rivera',
       handle: 'ava_r',
       bio: 'Indie nights and dreamy vocals.',
+      birthday: '1998-02-03',
+      matchOpen: true,
     },
   ],
   [
@@ -38,6 +42,8 @@ const socialProfiles = new Map([
       name: 'Milo Grant',
       handle: 'milo_g',
       bio: 'Hip-hop edits and gym energy.',
+      birthday: '1996-10-28',
+      matchOpen: false,
     },
   ],
   [
@@ -47,6 +53,8 @@ const socialProfiles = new Map([
       name: 'Jules Tan',
       handle: 'jules_mix',
       bio: 'House, disco, and late-night drives.',
+      birthday: '2001-01-11',
+      matchOpen: true,
     },
   ],
 ]);
@@ -66,6 +74,8 @@ function ensureSocialUser(userId) {
       name: userId,
       handle: userId.toLowerCase().replace(/\s+/g, ''),
       bio: 'Music fan',
+      birthday: '2000-01-01',
+      matchOpen: true,
     });
   }
   if (!socialLikes.has(userId)) {
@@ -76,13 +86,48 @@ function ensureSocialUser(userId) {
   }
 }
 
+function getAgeFromBirthday(birthday) {
+  const birthDate = new Date(birthday);
+  if (Number.isNaN(birthDate.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - birthDate.getFullYear();
+  const hadBirthdayThisYear =
+    now.getMonth() > birthDate.getMonth() ||
+    (now.getMonth() === birthDate.getMonth() && now.getDate() >= birthDate.getDate());
+  if (!hadBirthdayThisYear) age -= 1;
+  return age >= 0 ? age : null;
+}
+
+function isMutualMatch(viewerProfile, targetProfile, viewerFollowsTarget, targetFollowsViewer) {
+  return (
+    viewerFollowsTarget &&
+    targetFollowsViewer &&
+    Boolean(viewerProfile?.matchOpen) &&
+    Boolean(targetProfile?.matchOpen)
+  );
+}
+
 function toSocialUser(viewerId, profile) {
   ensureSocialUser(viewerId);
   ensureSocialUser(profile.id);
+  const viewerProfile = socialProfiles.get(viewerId);
+  const viewerFollowsTarget = socialFollows.get(viewerId).has(profile.id);
+  const targetFollowsViewer = socialFollows.get(profile.id).has(viewerId);
   return {
-    ...profile,
+    id: profile.id,
+    name: profile.name,
+    handle: profile.handle,
+    bio: profile.bio,
+    age: viewerFollowsTarget ? getAgeFromBirthday(profile.birthday) : null,
+    matchOpen: Boolean(profile.matchOpen),
+    isMatched: isMutualMatch(
+      viewerProfile,
+      profile,
+      viewerFollowsTarget,
+      targetFollowsViewer
+    ),
     likedMusic: socialLikes.get(profile.id) || [],
-    isFollowing: socialFollows.get(viewerId).has(profile.id),
+    isFollowing: viewerFollowsTarget,
   };
 }
 
@@ -140,6 +185,87 @@ app.post('/api/survey', (req, res) => {
     savedAt: Date.now(),
   };
   res.json({ ok: true });
+});
+
+app.post('/api/account/register', (req, res) => {
+  const { name, handle, bio, birthday, matchOpen } = req.body || {};
+  const cleanedName = String(name || '').trim();
+  const cleanedHandle = String(handle || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '');
+  const cleanedBio = String(bio || '').trim();
+  const cleanedBirthday = String(birthday || '').trim();
+
+  if (!cleanedName || !cleanedHandle || !cleanedBirthday) {
+    return res.status(400).json({ error: 'name, handle, and birthday are required' });
+  }
+  const birthDate = new Date(cleanedBirthday);
+  if (Number.isNaN(birthDate.getTime())) {
+    return res.status(400).json({ error: 'birthday must be a valid date' });
+  }
+  const age = getAgeFromBirthday(cleanedBirthday);
+  if (age === null || age < 13) {
+    return res.status(400).json({ error: 'You must be at least 13 years old' });
+  }
+  const taken = Array.from(socialProfiles.values()).some(
+    (profile) => profile.handle === cleanedHandle
+  );
+  if (taken) {
+    return res.status(409).json({ error: 'That handle is already taken' });
+  }
+
+  const userId = `user_${Date.now().toString(36)}`;
+  socialProfiles.set(userId, {
+    id: userId,
+    name: cleanedName,
+    handle: cleanedHandle,
+    bio: cleanedBio || 'Music fan',
+    birthday: cleanedBirthday,
+    matchOpen: matchOpen !== false,
+  });
+  ensureSocialUser(userId);
+
+  return res.status(201).json({
+    user: {
+      id: userId,
+      name: cleanedName,
+      handle: cleanedHandle,
+      bio: cleanedBio || 'Music fan',
+      age,
+      matchOpen: matchOpen !== false,
+    },
+  });
+});
+
+app.post('/api/account/match-mode', (req, res) => {
+  const { userId, matchOpen } = req.body || {};
+  const user = String(userId || '').trim();
+  if (!user || !socialProfiles.has(user)) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  const profile = socialProfiles.get(user);
+  profile.matchOpen = Boolean(matchOpen);
+  socialProfiles.set(user, profile);
+  return res.json({ ok: true, matchOpen: profile.matchOpen });
+});
+
+app.get('/api/account/profile', (req, res) => {
+  const userId = String(req.query.userId || '').trim();
+  if (!userId || !socialProfiles.has(userId)) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  const profile = socialProfiles.get(userId);
+  return res.json({
+    user: {
+      id: profile.id,
+      name: profile.name,
+      handle: profile.handle,
+      bio: profile.bio,
+      age: getAgeFromBirthday(profile.birthday),
+      matchOpen: Boolean(profile.matchOpen),
+    },
+  });
 });
 
 // Simple recommendation feed based on latest survey
@@ -245,7 +371,18 @@ app.post('/api/social/follow', (req, res) => {
   } else {
     following.add(target);
   }
-  return res.json({ ok: true, isFollowing: following.has(target) });
+  const viewerProfile = socialProfiles.get(viewer);
+  const targetProfile = socialProfiles.get(target);
+  return res.json({
+    ok: true,
+    isFollowing: following.has(target),
+    isMatched: isMutualMatch(
+      viewerProfile,
+      targetProfile,
+      following.has(target),
+      socialFollows.get(target).has(viewer)
+    ),
+  });
 });
 
 app.post('/api/social/like', (req, res) => {
@@ -300,6 +437,21 @@ app.post('/api/social/messages', (req, res) => {
   }
   ensureSocialUser(sender);
   ensureSocialUser(recipient);
+  const senderProfile = socialProfiles.get(sender);
+  const recipientProfile = socialProfiles.get(recipient);
+  const senderFollowsRecipient = socialFollows.get(sender).has(recipient);
+  const recipientFollowsSender = socialFollows.get(recipient).has(sender);
+  const canMessage = isMutualMatch(
+    senderProfile,
+    recipientProfile,
+    senderFollowsRecipient,
+    recipientFollowsSender
+  );
+  if (!canMessage) {
+    return res
+      .status(403)
+      .json({ error: 'Messaging is available only when both users are matched and match is open' });
+  }
   const message = {
     id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     fromId: sender,

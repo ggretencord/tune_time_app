@@ -84,6 +84,33 @@
   margin-bottom: 14px;
 }
 
+.account-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.field-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
 .search-input {
   flex: 1;
   padding: 10px 12px;
@@ -331,6 +358,12 @@
   font-size: 13px;
   padding: 10px 12px;
   cursor: pointer;
+}
+
+.pass-btn:disabled,
+.like-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .pass-btn {
