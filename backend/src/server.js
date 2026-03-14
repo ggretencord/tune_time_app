@@ -314,6 +314,7 @@ function isMutualMatch(viewerProfile, targetProfile, viewerFollowsTarget, target
 }
 
 function toViewerAccount(profile) {
+  ensureSocialUser(profile.id);
   return {
     id: profile.id,
     name: profile.name,
@@ -322,6 +323,7 @@ function toViewerAccount(profile) {
     age: getAgeFromBirthday(profile.birthday),
     matchOpen: Boolean(profile.matchOpen),
     profileImageUrl: String(profile.profileImageUrl || ''),
+    likedMusic: socialLikes.get(profile.id) || [],
   };
 }
 

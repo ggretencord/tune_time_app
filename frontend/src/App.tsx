@@ -55,6 +55,7 @@ type ViewerAccount = {
   age: number
   matchOpen: boolean
   profileImageUrl: string
+  likedMusic: Track[]
 }
 
 type CompatibilityBreakdown = {
@@ -831,7 +832,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
     'discover' | 'liked' | 'dating' | 'photos' | 'community' | 'messages'
   >('discover')
   const [activeIndex, setActiveIndex] = useState(0)
-  const [likedSongs, setLikedSongs] = useState<Track[]>([])
+  const [likedSongs, setLikedSongs] = useState<Track[]>(() => viewer.likedMusic || [])
   const [dislikedCount, setDislikedCount] = useState(0)
   const [scrollHistory, setScrollHistory] = useState<string[]>([])
   const [dragStartX, setDragStartX] = useState<number | null>(null)
