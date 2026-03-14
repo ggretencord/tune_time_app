@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 4010;
@@ -67,6 +68,31 @@ const socialFollows = new Map([
   ['jules', new Set()],
 ]);
 
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16);
+  const derived = crypto.scryptSync(password, salt, 64);
+  return `${salt.toString('hex')}:${derived.toString('hex')}`;
+}
+
+function verifyPassword(password, storedHash) {
+  if (!storedHash || !storedHash.includes(':')) return false;
+  const [saltHex, hashHex] = storedHash.split(':');
+  if (!saltHex || !hashHex) return false;
+  const salt = Buffer.from(saltHex, 'hex');
+  const expected = Buffer.from(hashHex, 'hex');
+  const actual = crypto.scryptSync(password, salt, expected.length);
+  if (actual.length !== expected.length) return false;
+  return crypto.timingSafeEqual(actual, expected);
+}
+
+function initializeSeedPasswords() {
+  for (const profile of socialProfiles.values()) {
+    if (!profile.passwordHash) {
+      profile.passwordHash = hashPassword('password123');
+    }
+  }
+}
+
 function ensureSocialUser(userId) {
   if (!socialProfiles.has(userId)) {
     socialProfiles.set(userId, {
@@ -76,6 +102,7 @@ function ensureSocialUser(userId) {
       bio: 'Music fan',
       birthday: '2000-01-01',
       matchOpen: true,
+      passwordHash: hashPassword('password123'),
     });
   }
   if (!socialLikes.has(userId)) {
@@ -105,6 +132,17 @@ function isMutualMatch(viewerProfile, targetProfile, viewerFollowsTarget, target
     Boolean(viewerProfile?.matchOpen) &&
     Boolean(targetProfile?.matchOpen)
   );
+}
+
+function toViewerAccount(profile) {
+  return {
+    id: profile.id,
+    name: profile.name,
+    handle: profile.handle,
+    bio: profile.bio,
+    age: getAgeFromBirthday(profile.birthday),
+    matchOpen: Boolean(profile.matchOpen),
+  };
 }
 
 function toSocialUser(viewerId, profile) {
@@ -188,7 +226,7 @@ app.post('/api/survey', (req, res) => {
 });
 
 app.post('/api/account/register', (req, res) => {
-  const { name, handle, bio, birthday, matchOpen } = req.body || {};
+  const { name, handle, bio, birthday, matchOpen, password } = req.body || {};
   const cleanedName = String(name || '').trim();
   const cleanedHandle = String(handle || '')
     .trim()
@@ -196,9 +234,13 @@ app.post('/api/account/register', (req, res) => {
     .replace(/[^a-z0-9_]/g, '');
   const cleanedBio = String(bio || '').trim();
   const cleanedBirthday = String(birthday || '').trim();
+  const cleanedPassword = String(password || '');
 
-  if (!cleanedName || !cleanedHandle || !cleanedBirthday) {
-    return res.status(400).json({ error: 'name, handle, and birthday are required' });
+  if (!cleanedName || !cleanedHandle || !cleanedBirthday || !cleanedPassword) {
+    return res.status(400).json({ error: 'name, handle, birthday, and password are required' });
+  }
+  if (cleanedPassword.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
   }
   const birthDate = new Date(cleanedBirthday);
   if (Number.isNaN(birthDate.getTime())) {
@@ -223,19 +265,36 @@ app.post('/api/account/register', (req, res) => {
     bio: cleanedBio || 'Music fan',
     birthday: cleanedBirthday,
     matchOpen: matchOpen !== false,
+    passwordHash: hashPassword(cleanedPassword),
   });
   ensureSocialUser(userId);
 
-  return res.status(201).json({
-    user: {
-      id: userId,
-      name: cleanedName,
-      handle: cleanedHandle,
-      bio: cleanedBio || 'Music fan',
-      age,
-      matchOpen: matchOpen !== false,
-    },
-  });
+  return res.status(201).json({ user: toViewerAccount(socialProfiles.get(userId)) });
+});
+
+app.post('/api/account/login', (req, res) => {
+  const { handle, password } = req.body || {};
+  const cleanedHandle = String(handle || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '');
+  const cleanedPassword = String(password || '');
+  if (!cleanedHandle || !cleanedPassword) {
+    return res.status(400).json({ error: 'handle and password are required' });
+  }
+
+  const profile = Array.from(socialProfiles.values()).find(
+    (candidate) => candidate.handle === cleanedHandle
+  );
+  if (!profile) {
+    return res.status(404).json({ error: 'No account found for that handle' });
+  }
+  if (!verifyPassword(cleanedPassword, profile.passwordHash)) {
+    return res.status(401).json({ error: 'Invalid handle or password' });
+  }
+
+  ensureSocialUser(profile.id);
+  return res.json({ user: toViewerAccount(profile) });
 });
 
 app.post('/api/account/match-mode', (req, res) => {
@@ -256,16 +315,7 @@ app.get('/api/account/profile', (req, res) => {
     return res.status(404).json({ error: 'User not found' });
   }
   const profile = socialProfiles.get(userId);
-  return res.json({
-    user: {
-      id: profile.id,
-      name: profile.name,
-      handle: profile.handle,
-      bio: profile.bio,
-      age: getAgeFromBirthday(profile.birthday),
-      matchOpen: Boolean(profile.matchOpen),
-    },
-  });
+  return res.json({ user: toViewerAccount(profile) });
 });
 
 // Simple recommendation feed based on latest survey
@@ -497,6 +547,8 @@ app.get('/api/lyrics', async (req, res) => {
     return res.json({ lines: [] });
   }
 });
+
+initializeSeedPasswords();
 
 seedSocialLikes()
   .catch((err) => {

@@ -53,47 +53,124 @@ type ViewerAccount = {
 }
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+const VIEWER_STORAGE_KEY = 'tune_time_viewer_id'
+
+function getSurveyStorageKey(userId: string) {
+  return `tune_time_survey_complete_${userId}`
+}
 
 function App() {
   const [step, setStep] = useState<'account' | 'survey' | 'feed'>('account')
   const [viewer, setViewer] = useState<ViewerAccount | null>(null)
+  const [hydrating, setHydrating] = useState(true)
+
+  useEffect(() => {
+    async function restoreSession() {
+      const storedUserId = window.localStorage.getItem(VIEWER_STORAGE_KEY)
+      if (!storedUserId) {
+        setHydrating(false)
+        return
+      }
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/account/profile?userId=${encodeURIComponent(storedUserId)}`,
+        )
+        const data = (await res.json()) as { user?: ViewerAccount }
+        if (!res.ok || !data.user) {
+          throw new Error('session not found')
+        }
+        setViewer(data.user)
+        const hasSurvey = window.localStorage.getItem(getSurveyStorageKey(data.user.id)) === '1'
+        setStep(hasSurvey ? 'feed' : 'survey')
+      } catch {
+        window.localStorage.removeItem(VIEWER_STORAGE_KEY)
+        setStep('account')
+      } finally {
+        setHydrating(false)
+      }
+    }
+
+    restoreSession()
+  }, [])
+
+  if (hydrating) {
+    return (
+      <div className="app-root">
+        <div className="screen feed-screen">
+          <div className="loading-state">Loading your account...</div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="app-root">
       {step === 'account' ? (
         <AccountScreen
-          onCreated={(user) => {
+          onAuthSuccess={(user) => {
+            window.localStorage.setItem(VIEWER_STORAGE_KEY, user.id)
             setViewer(user)
-            setStep('survey')
+            const hasSurvey = window.localStorage.getItem(getSurveyStorageKey(user.id)) === '1'
+            setStep(hasSurvey ? 'feed' : 'survey')
           }}
         />
       ) : step === 'survey' && viewer ? (
-        <SurveyScreen viewerId={viewer.id} onDone={() => setStep('feed')} />
+        <SurveyScreen
+          viewerId={viewer.id}
+          onDone={() => {
+            window.localStorage.setItem(getSurveyStorageKey(viewer.id), '1')
+            setStep('feed')
+          }}
+        />
       ) : (
-        viewer && <FeedScreen viewer={viewer} onViewerUpdate={setViewer} />
+        viewer && (
+          <FeedScreen
+            viewer={viewer}
+            onViewerUpdate={setViewer}
+            onSignOut={() => {
+              window.localStorage.removeItem(VIEWER_STORAGE_KEY)
+              setViewer(null)
+              setStep('account')
+            }}
+          />
+        )
       )}
     </div>
   )
 }
 
 type AccountScreenProps = {
-  onCreated: (user: ViewerAccount) => void
+  onAuthSuccess: (user: ViewerAccount) => void
 }
 
-function AccountScreen({ onCreated }: AccountScreenProps) {
+function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
+  const [mode, setMode] = useState<'create' | 'signin'>('create')
   const [name, setName] = useState('')
   const [handle, setHandle] = useState('')
   const [bio, setBio] = useState('')
   const [birthday, setBirthday] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [matchOpen, setMatchOpen] = useState(true)
+  const [signinHandle, setSigninHandle] = useState('')
+  const [signinPassword, setSigninPassword] = useState('')
   const [creating, setCreating] = useState(false)
+  const [signingIn, setSigningIn] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function handleCreateAccount(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
-    if (!name.trim() || !handle.trim() || !birthday) {
-      setError('Name, handle, and birthday are required.')
+    if (!name.trim() || !handle.trim() || !birthday || !password) {
+      setError('Name, handle, birthday, and password are required.')
+      return
+    }
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters.')
+      return
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.')
       return
     }
     setCreating(true)
@@ -107,13 +184,14 @@ function AccountScreen({ onCreated }: AccountScreenProps) {
           bio: bio.trim(),
           birthday,
           matchOpen,
+          password,
         }),
       })
       const data = (await res.json()) as { error?: string; user?: ViewerAccount }
       if (!res.ok || !data.user) {
         throw new Error(data.error || 'Could not create account')
       }
-      onCreated(data.user)
+      onAuthSuccess(data.user)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not create account'
       setError(message)
@@ -122,57 +200,169 @@ function AccountScreen({ onCreated }: AccountScreenProps) {
     }
   }
 
+  async function handleSignIn(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    if (!signinHandle.trim() || !signinPassword) {
+      setError('Enter your handle and password to sign in.')
+      return
+    }
+    setSigningIn(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/account/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ handle: signinHandle.trim(), password: signinPassword }),
+      })
+      const data = (await res.json()) as { error?: string; user?: ViewerAccount }
+      if (!res.ok || !data.user) {
+        throw new Error(data.error || 'Could not sign in')
+      }
+      onAuthSuccess(data.user)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not sign in'
+      setError(message)
+    } finally {
+      setSigningIn(false)
+    }
+  }
+
   return (
     <div className="screen survey-screen">
       <header className="top-bar">
         <span className="brand">Tune Time</span>
-        <span className="pill">Create account</span>
+        <span className="pill">{mode === 'create' ? 'Create account' : 'Sign in'}</span>
       </header>
       <main className="content">
-        <h1 className="title">Create your account</h1>
-        <p className="subtitle">Birthday is required. Only followers can see your age, never your birthday.</p>
-        <form className="account-form" onSubmit={handleCreateAccount}>
-          <label className="field-label">
-            Name
-            <input className="search-input field-input" value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
-          <label className="field-label">
-            Handle
-            <input
-              className="search-input field-input"
-              value={handle}
-              onChange={(e) => setHandle(e.target.value)}
-              placeholder="your_handle"
-            />
-          </label>
-          <label className="field-label">
-            Bio (optional)
-            <input className="search-input field-input" value={bio} onChange={(e) => setBio(e.target.value)} />
-          </label>
-          <label className="field-label">
-            Birthday
-            <input
-              className="search-input field-input"
-              value={birthday}
-              onChange={(e) => setBirthday(e.target.value)}
-              type="date"
-            />
-          </label>
-          <label className="toggle-row">
-            <span>Match mode</span>
-            <button
-              className={matchOpen ? 'like-btn' : 'pass-btn'}
-              type="button"
-              onClick={() => setMatchOpen((prev) => !prev)}
-            >
-              {matchOpen ? 'Open (can match)' : 'Closed (just listen)'}
-            </button>
-          </label>
-          {error && <p className="error-text">{error}</p>}
-          <button className="primary-btn primary-btn-wide" type="submit" disabled={creating}>
-            {creating ? 'Creating...' : 'Continue'}
+        <div className="tab-row account-mode-tabs">
+          <button
+            className={`tab-btn ${mode === 'create' ? 'tab-btn-active' : ''}`}
+            type="button"
+            onClick={() => {
+              setMode('create')
+              setError(null)
+            }}
+          >
+            Create
           </button>
-        </form>
+          <button
+            className={`tab-btn ${mode === 'signin' ? 'tab-btn-active' : ''}`}
+            type="button"
+            onClick={() => {
+              setMode('signin')
+              setError(null)
+            }}
+          >
+            Sign In
+          </button>
+        </div>
+
+        {mode === 'create' ? (
+          <>
+            <h1 className="title">Create your account</h1>
+            <p className="subtitle">
+              Birthday is required. Only followers can see your age, never your birthday.
+            </p>
+            <form className="account-form" onSubmit={handleCreateAccount}>
+              <label className="field-label">
+                Name
+                <input
+                  className="search-input field-input"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </label>
+              <label className="field-label">
+                Handle
+                <input
+                  className="search-input field-input"
+                  value={handle}
+                  onChange={(e) => setHandle(e.target.value)}
+                  placeholder="your_handle"
+                />
+              </label>
+              <label className="field-label">
+                Bio (optional)
+                <input
+                  className="search-input field-input"
+                  value={bio}
+                  onChange={(e) => setBio(e.target.value)}
+                />
+              </label>
+              <label className="field-label">
+                Birthday
+                <input
+                  className="search-input field-input"
+                  value={birthday}
+                  onChange={(e) => setBirthday(e.target.value)}
+                  type="date"
+                />
+              </label>
+              <label className="field-label">
+                Password
+                <input
+                  className="search-input field-input"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  type="password"
+                  placeholder="At least 8 characters"
+                />
+              </label>
+              <label className="field-label">
+                Confirm password
+                <input
+                  className="search-input field-input"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  type="password"
+                />
+              </label>
+              <label className="toggle-row">
+                <span>Match mode</span>
+                <button
+                  className={matchOpen ? 'like-btn' : 'pass-btn'}
+                  type="button"
+                  onClick={() => setMatchOpen((prev) => !prev)}
+                >
+                  {matchOpen ? 'Open (can match)' : 'Closed (just listen)'}
+                </button>
+              </label>
+              {error && <p className="error-text">{error}</p>}
+              <button className="primary-btn primary-btn-wide" type="submit" disabled={creating}>
+                {creating ? 'Creating...' : 'Continue'}
+              </button>
+            </form>
+          </>
+        ) : (
+          <>
+            <h1 className="title">Sign in</h1>
+            <p className="subtitle">Use your handle from account creation.</p>
+            <form className="account-form" onSubmit={handleSignIn}>
+              <label className="field-label">
+                Handle
+                <input
+                  className="search-input field-input"
+                  value={signinHandle}
+                  onChange={(e) => setSigninHandle(e.target.value)}
+                  placeholder="your_handle"
+                />
+              </label>
+              <label className="field-label">
+                Password
+                <input
+                  className="search-input field-input"
+                  value={signinPassword}
+                  onChange={(e) => setSigninPassword(e.target.value)}
+                  type="password"
+                />
+              </label>
+              {error && <p className="error-text">{error}</p>}
+              <button className="primary-btn primary-btn-wide" type="submit" disabled={signingIn}>
+                {signingIn ? 'Signing in...' : 'Sign In'}
+              </button>
+            </form>
+          </>
+        )}
       </main>
     </div>
   )
@@ -352,9 +542,10 @@ function SurveyScreen({ viewerId, onDone }: SurveyProps) {
 type FeedScreenProps = {
   viewer: ViewerAccount
   onViewerUpdate: (next: ViewerAccount) => void
+  onSignOut: () => void
 }
 
-function FeedScreen({ viewer, onViewerUpdate }: FeedScreenProps) {
+function FeedScreen({ viewer, onViewerUpdate, onSignOut }: FeedScreenProps) {
   const [items, setItems] = useState<Track[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -623,7 +814,12 @@ function FeedScreen({ viewer, onViewerUpdate }: FeedScreenProps) {
     <div className="screen feed-screen">
       <header className="top-bar">
         <span className="brand">Tune Time</span>
-        <span className="pill">{actionSummary}</span>
+        <div className="header-actions">
+          <span className="pill">{actionSummary}</span>
+          <button className="mini-btn" type="button" onClick={onSignOut}>
+            Sign out
+          </button>
+        </div>
       </header>
 
       <nav className="tab-row">

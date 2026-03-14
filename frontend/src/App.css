@@ -274,6 +274,28 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 
+.account-mode-tabs {
+  margin: 0 -4px 12px;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mini-btn {
+  border: 1px solid var(--border-subtle);
+  background: rgba(8, 8, 16, 0.9);
+  color: var(--text-main);
+  border-radius: 999px;
+  font-size: 11px;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+
 .tab-btn {
   flex: 1;
   border: 1px solid var(--border-subtle);
