@@ -1097,6 +1097,21 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
     setActiveId(track.id)
   }
 
+  function handleSelectGlobalClip(track: Track) {
+    const existingTrackIndex = items.findIndex((song) => song.id === track.id)
+    if (existingTrackIndex >= 0) {
+      setActiveIndex(existingTrackIndex)
+    } else {
+      setItems((prev) => [track, ...prev])
+      setActiveIndex(0)
+    }
+    setTab('discover')
+    setDragX(0)
+    setGlobalClipQuery('')
+    setGlobalClipResults([])
+    setGlobalClipError(null)
+  }
+
   async function swipe(action: 'like' | 'dislike') {
     if (!currentTrack || !items.length) return
     if (action === 'like') {
@@ -1277,7 +1292,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
                       key={song.id}
                       type="button"
                       className="result-row global-search-result-row"
-                      onClick={() => handlePlay(song)}
+                      onClick={() => handleSelectGlobalClip(song)}
                     >
                       {song.artworkUrl && <img src={song.artworkUrl} alt="" className="result-artwork" />}
                       <div className="result-meta">
