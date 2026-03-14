@@ -778,6 +778,10 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const [activeId, setActiveId] = useState<string | null>(null)
   const [duration, setDuration] = useState(30)
   const [lyricsByTrack, setLyricsByTrack] = useState<Record<string, TimedLyricLine[]>>({})
+  const [globalClipQuery, setGlobalClipQuery] = useState('')
+  const [globalClipResults, setGlobalClipResults] = useState<Track[]>([])
+  const [globalClipLoading, setGlobalClipLoading] = useState(false)
+  const [globalClipError, setGlobalClipError] = useState<string | null>(null)
   const profilePhotoInputRef = useRef<HTMLInputElement | null>(null)
   const photoThreadInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -1037,6 +1041,44 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
     loadLyrics(currentTrack)
   }, [currentTrack, duration, lyricsByTrack])
 
+  useEffect(() => {
+    const trimmedQuery = globalClipQuery.trim()
+    if (!trimmedQuery) {
+      setGlobalClipResults([])
+      setGlobalClipError(null)
+      setGlobalClipLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => {
+      async function searchSongClips() {
+        setGlobalClipLoading(true)
+        setGlobalClipError(null)
+        try {
+          const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(trimmedQuery)}`, {
+            signal: controller.signal,
+          })
+          if (!res.ok) throw new Error('Search failed')
+          const data = (await res.json()) as { tracks?: Track[] }
+          setGlobalClipResults(Array.isArray(data.tracks) ? data.tracks : [])
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') return
+          setGlobalClipError('Could not search song clips right now.')
+          setGlobalClipResults([])
+        } finally {
+          setGlobalClipLoading(false)
+        }
+      }
+      searchSongClips()
+    }, 250)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+      controller.abort()
+    }
+  }, [globalClipQuery])
+
   function handlePlay(track: Track, restart = false) {
     if (!audioRef.current) {
       audioRef.current = new Audio()
@@ -1211,8 +1253,50 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
 
   return (
     <div className="screen feed-screen">
-      <header className="top-bar">
-        <span className="brand">Tune Time</span>
+      <header className="top-bar feed-top-bar">
+        <div className="feed-top-left">
+          <span className="brand">Tune Time</span>
+          <div className="global-clip-search">
+            <input
+              className="search-input global-search-input"
+              placeholder="Search song clips"
+              value={globalClipQuery}
+              onChange={(e) => setGlobalClipQuery(e.target.value)}
+            />
+            {globalClipQuery.trim() && (
+              <div className="global-search-results">
+                {globalClipLoading ? (
+                  <p className="empty-text global-search-message">Searching song clips...</p>
+                ) : globalClipError ? (
+                  <p className="error-text global-search-message">{globalClipError}</p>
+                ) : globalClipResults.length === 0 ? (
+                  <p className="empty-text global-search-message">No song clips found.</p>
+                ) : (
+                  globalClipResults.map((song) => (
+                    <button
+                      key={song.id}
+                      type="button"
+                      className="result-row global-search-result-row"
+                      onClick={() => handlePlay(song)}
+                    >
+                      {song.artworkUrl && <img src={song.artworkUrl} alt="" className="result-artwork" />}
+                      <div className="result-meta">
+                        <span className="song-title">{song.title}</span>
+                        <span className="song-artist">
+                          {song.artist}
+                          {song.album ? ` • ${song.album}` : ''}
+                        </span>
+                      </div>
+                      <span className="result-badge">
+                        {activeId === song.id ? 'Pause Clip' : 'Play Clip'}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </div>
         <div className="header-actions">
           <span className="pill">{actionSummary}</span>
           <button className="mini-btn" type="button" onClick={onSignOut}>
@@ -1330,8 +1414,14 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
                   {song.artworkUrl && <img src={song.artworkUrl} alt="" className="result-artwork" />}
                   <div className="result-meta">
                     <span className="song-title">{song.title}</span>
-                    <span className="song-artist">{song.artist}</span>
+                    <span className="song-artist">
+                      {song.artist}
+                      {song.album ? ` • ${song.album}` : ''}
+                    </span>
                   </div>
+                  <button className="mini-btn list-row-action" type="button" onClick={() => handlePlay(song)}>
+                    {activeId === song.id ? 'Pause Clip' : 'Play Clip'}
+                  </button>
                 </article>
               ))}
             </div>
