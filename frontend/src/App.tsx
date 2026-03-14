@@ -56,12 +56,16 @@ type CompatibilityBreakdown = {
   score: number
   sharedTracks: Track[]
   sharedArtists: string[]
+  sharedMoods: string[]
   ageDelta: number | null
   matchOpenBoost: number
 }
 
+type DatingAgeFilter = 'all' | '18-24' | '25-30' | '31-38' | '39+'
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const SESSION_STORAGE_KEY = 'tune_time_session_token'
+const DATING_MOOD_OPTIONS = ['chill', 'hype', 'sad', 'focus', 'party', 'romantic'] as const
 
 function getSurveyStorageKey(userId: string) {
   return `tune_time_survey_complete_${userId}`
@@ -77,6 +81,29 @@ function uniqueLowercase(values: string[]) {
   return new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean))
 }
 
+function inferMoodsFromTracks(tracks: Track[]) {
+  const moods = new Set<string>()
+  for (const track of tracks) {
+    const source = `${track.genre || ''} ${track.title} ${track.artist}`.toLowerCase()
+    if (/(lofi|ambient|indie|acoustic|chill|downtempo|soft)/.test(source)) moods.add('chill')
+    if (/(edm|dance|trap|drill|house|club|hype|rage)/.test(source)) moods.add('hype')
+    if (/(sad|ballad|blues|melancholy|heartbreak|emo)/.test(source)) moods.add('sad')
+    if (/(focus|instrumental|study|classical|piano|jazz)/.test(source)) moods.add('focus')
+    if (/(party|reggaeton|afrobeats|pop|latin|festival)/.test(source)) moods.add('party')
+    if (/(romantic|love|rnb|soul|slow jam|serenade)/.test(source)) moods.add('romantic')
+  }
+  return moods
+}
+
+function matchesDatingAgeFilter(age: number | null, filter: DatingAgeFilter) {
+  if (filter === 'all') return true
+  if (age === null) return false
+  if (filter === '18-24') return age >= 18 && age <= 24
+  if (filter === '25-30') return age >= 25 && age <= 30
+  if (filter === '31-38') return age >= 31 && age <= 38
+  return age >= 39
+}
+
 function buildCompatibility(
   viewer: ViewerAccount,
   myLikes: Track[],
@@ -88,11 +115,15 @@ function buildCompatibility(
   const myArtists = uniqueLowercase(myLikes.map((track) => track.artist))
   const candidateArtists = uniqueLowercase(candidate.likedMusic.map((track) => track.artist))
   const sharedArtists = [...myArtists].filter((artist) => candidateArtists.has(artist))
+  const myMoods = inferMoodsFromTracks(myLikes)
+  const candidateMoods = inferMoodsFromTracks(candidate.likedMusic)
+  const sharedMoods = [...myMoods].filter((mood) => candidateMoods.has(mood))
 
   // Dating-style compatibility with stronger emphasis on music overlap.
-  const musicTrackScore = myLikes.length ? sharedTracks.length / myLikes.length : 0.45
-  const musicArtistScore = myArtists.size ? sharedArtists.length / myArtists.size : 0.45
-  const musicScore = Math.min(1, musicTrackScore * 0.7 + musicArtistScore * 0.3)
+  const musicTrackScore = myLikes.length ? sharedTracks.length / myLikes.length : 0.35
+  const musicArtistScore = myArtists.size ? sharedArtists.length / myArtists.size : 0.35
+  const moodScore = myMoods.size ? sharedMoods.length / myMoods.size : 0.35
+  const musicScore = Math.min(1, musicTrackScore * 0.6 + musicArtistScore * 0.25 + moodScore * 0.15)
 
   const ageDelta =
     typeof candidate.age === 'number' && typeof viewer.age === 'number'
@@ -103,12 +134,13 @@ function buildCompatibility(
   const matchOpenScore = candidate.matchOpen ? 1 : 0.25
 
   const weightedScore =
-    musicScore * 0.72 + ageScore * 0.16 + profileScore * 0.07 + matchOpenScore * 0.05
+    musicScore * 0.78 + ageScore * 0.12 + profileScore * 0.06 + matchOpenScore * 0.04
 
   return {
     score: Math.round(weightedScore * 100),
     sharedTracks,
     sharedArtists,
+    sharedMoods,
     ageDelta,
     matchOpenBoost: Math.round(matchOpenScore * 100),
   }
@@ -633,6 +665,8 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const [datingLikedUserIds, setDatingLikedUserIds] = useState<string[]>([])
   const [datingPassedUserIds, setDatingPassedUserIds] = useState<string[]>([])
   const [datingMatchedUserIds, setDatingMatchedUserIds] = useState<string[]>([])
+  const [datingAgeFilter, setDatingAgeFilter] = useState<DatingAgeFilter>('all')
+  const [datingMoodFilters, setDatingMoodFilters] = useState<string[]>([])
   const [socialUsers, setSocialUsers] = useState<SocialUser[]>([])
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
   const [chatInput, setChatInput] = useState('')
@@ -653,6 +687,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
       .filter((user) => user.id !== viewer.id)
       .map((candidate) => ({
         candidate,
+        candidateMoods: inferMoodsFromTracks(candidate.likedMusic),
         compatibility: buildCompatibility(viewer, likedSongs, candidate),
       }))
       .sort((a, b) => b.compatibility.score - a.compatibility.score)
@@ -660,12 +695,22 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const remainingDatingCandidates = useMemo(
     () =>
       datingCandidates.filter(
-        ({ candidate }) =>
-          !datingLikedUserIds.includes(candidate.id) && !datingPassedUserIds.includes(candidate.id),
+        ({ candidate, candidateMoods }) =>
+          !datingLikedUserIds.includes(candidate.id) &&
+          !datingPassedUserIds.includes(candidate.id) &&
+          matchesDatingAgeFilter(candidate.age, datingAgeFilter) &&
+          (datingMoodFilters.length === 0 ||
+            datingMoodFilters.some((mood) => candidateMoods.has(mood))),
       ),
-    [datingCandidates, datingLikedUserIds, datingPassedUserIds],
+    [datingAgeFilter, datingCandidates, datingLikedUserIds, datingMoodFilters, datingPassedUserIds],
   )
   const activeDatingCandidate = remainingDatingCandidates[0] || null
+
+  function toggleDatingMoodFilter(mood: string) {
+    setDatingMoodFilters((prev) =>
+      prev.includes(mood) ? prev.filter((candidateMood) => candidateMood !== mood) : [...prev, mood],
+    )
+  }
 
   useEffect(() => {
     async function loadFeed() {
@@ -1084,11 +1129,40 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
         <main className="swipe-main">
           {socialError && <p className="error-text">{socialError}</p>}
           <section className="deck">
+            <section className="dating-filters">
+              <p className="song-artist">Compatibility filters</p>
+              <div className="chips-row dating-filter-row">
+                {(['all', '18-24', '25-30', '31-38', '39+'] as DatingAgeFilter[]).map((range) => (
+                  <button
+                    key={range}
+                    type="button"
+                    className={`chip ${datingAgeFilter === range ? 'chip-selected' : ''}`}
+                    onClick={() => setDatingAgeFilter(range)}
+                  >
+                    {range === 'all' ? 'Any age' : range}
+                  </button>
+                ))}
+              </div>
+              <div className="chips-row dating-filter-row">
+                {DATING_MOOD_OPTIONS.map((mood) => (
+                  <button
+                    key={mood}
+                    type="button"
+                    className={`chip ${datingMoodFilters.includes(mood) ? 'chip-selected' : ''}`}
+                    onClick={() => toggleDatingMoodFilter(mood)}
+                  >
+                    {mood}
+                  </button>
+                ))}
+              </div>
+            </section>
             {!activeDatingCandidate ? (
               <article className="swipe-card dating-card-empty">
                 <div className="cover-meta dating-meta">
                   <h2 className="card-title">No more profiles for now</h2>
-                  <p className="card-artist">You went through all available dating profiles.</p>
+                  <p className="card-artist">
+                    You went through all available profiles for these filters.
+                  </p>
                   {datingMatchedUserIds.length > 0 && (
                     <p className="card-album">
                       {datingMatchedUserIds.length} music match
@@ -1133,11 +1207,13 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
                 )}
                 <div className="compat-pill">
                   {activeDatingCandidate.compatibility.score}% compatible
-                  {activeDatingCandidate.compatibility.score >= 80
-                    ? ' · strong music fit'
-                    : activeDatingCandidate.compatibility.score >= 65
-                      ? ' · good fit'
-                      : ' · explore vibes'}
+                  {activeDatingCandidate.compatibility.score >= 88
+                    ? ' · excellent match'
+                    : activeDatingCandidate.compatibility.score >= 76
+                      ? ' · great match'
+                      : activeDatingCandidate.compatibility.score >= 62
+                        ? ' · good potential'
+                        : ' · music wildcard'}
                 </div>
                 <div className="cover-meta dating-meta">
                   <h2 className="card-title">
@@ -1154,6 +1230,11 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
                     Shared songs: {activeDatingCandidate.compatibility.sharedTracks.length} · Shared artists:{' '}
                     {activeDatingCandidate.compatibility.sharedArtists.length}
                   </p>
+                  {activeDatingCandidate.compatibility.sharedMoods.length > 0 && (
+                    <p className="song-artist">
+                      Shared vibes: {activeDatingCandidate.compatibility.sharedMoods.join(' · ')}
+                    </p>
+                  )}
                   {activeDatingCandidate.compatibility.sharedTracks.length > 0 && (
                     <div className="chips-row dating-shared-row">
                       {activeDatingCandidate.compatibility.sharedTracks.slice(0, 3).map((track) => (

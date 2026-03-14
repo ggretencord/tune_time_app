@@ -327,6 +327,17 @@
   gap: 12px;
 }
 
+.dating-filters {
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: rgba(8, 8, 16, 0.9);
+  padding: 10px;
+}
+
+.dating-filter-row {
+  margin-bottom: 0;
+}
+
 .swipe-card {
   position: relative;
   flex: 1;
