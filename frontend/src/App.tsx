@@ -778,7 +778,6 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const [socialError, setSocialError] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(30)
   const [lyricsByTrack, setLyricsByTrack] = useState<Record<string, TimedLyricLine[]>>({})
   const profilePhotoInputRef = useRef<HTMLInputElement | null>(null)
@@ -996,15 +995,12 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
       audioRef.current = new Audio()
     }
     const player = audioRef.current
-    const onTimeUpdate = () => setCurrentTime(player.currentTime || 0)
     const onLoadedMeta = () => setDuration(player.duration || 30)
     const onEnded = () => setActiveId(null)
-    player.addEventListener('timeupdate', onTimeUpdate)
     player.addEventListener('loadedmetadata', onLoadedMeta)
     player.addEventListener('ended', onEnded)
     return () => {
       player.pause()
-      player.removeEventListener('timeupdate', onTimeUpdate)
       player.removeEventListener('loadedmetadata', onLoadedMeta)
       player.removeEventListener('ended', onEnded)
     }
@@ -1041,11 +1037,6 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
     loadLyrics(currentTrack)
   }, [currentTrack, duration, lyricsByTrack])
 
-  const activeLyrics = currentTrack ? lyricsByTrack[currentTrack.id] || [] : []
-  const currentLyric =
-    activeLyrics.find((line) => currentTime >= line.startTime && currentTime < line.endTime)
-      ?.text || ''
-
   function handlePlay(track: Track, restart = false) {
     if (!audioRef.current) {
       audioRef.current = new Audio()
@@ -1059,7 +1050,6 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
     if (player.src !== track.previewUrl || restart) {
       player.src = track.previewUrl
       player.currentTime = 0
-      setCurrentTime(0)
     }
     player.play().catch(() => {})
     setActiveId(track.id)
@@ -1305,9 +1295,6 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
                 <div className={`swipe-chip ${swipeLabel === 'LIKE' ? 'swipe-like' : 'swipe-pass'}`}>
                   {swipeLabel}
                 </div>
-              )}
-              {activeId === currentTrack.id && currentLyric && (
-                <p className="lyrics-overlay">{currentLyric}</p>
               )}
               <div className="cover-meta">
                 <h2 className="card-title">{currentTrack.title}</h2>
