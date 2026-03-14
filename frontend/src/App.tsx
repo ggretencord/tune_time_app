@@ -52,6 +52,14 @@ type ViewerAccount = {
   matchOpen: boolean
 }
 
+type CompatibilityBreakdown = {
+  score: number
+  sharedTracks: Track[]
+  sharedArtists: string[]
+  ageDelta: number | null
+  matchOpenBoost: number
+}
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const SESSION_STORAGE_KEY = 'tune_time_session_token'
 
@@ -62,6 +70,47 @@ function getSurveyStorageKey(userId: string) {
 function authHeaders(token: string) {
   return {
     Authorization: `Bearer ${token}`,
+  }
+}
+
+function uniqueLowercase(values: string[]) {
+  return new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean))
+}
+
+function buildCompatibility(
+  viewer: ViewerAccount,
+  myLikes: Track[],
+  candidate: SocialUser,
+): CompatibilityBreakdown {
+  const myTrackIds = new Set(myLikes.map((track) => track.id))
+  const sharedTracks = candidate.likedMusic.filter((track) => myTrackIds.has(track.id))
+
+  const myArtists = uniqueLowercase(myLikes.map((track) => track.artist))
+  const candidateArtists = uniqueLowercase(candidate.likedMusic.map((track) => track.artist))
+  const sharedArtists = [...myArtists].filter((artist) => candidateArtists.has(artist))
+
+  // Dating-style compatibility with stronger emphasis on music overlap.
+  const musicTrackScore = myLikes.length ? sharedTracks.length / myLikes.length : 0.45
+  const musicArtistScore = myArtists.size ? sharedArtists.length / myArtists.size : 0.45
+  const musicScore = Math.min(1, musicTrackScore * 0.7 + musicArtistScore * 0.3)
+
+  const ageDelta =
+    typeof candidate.age === 'number' && typeof viewer.age === 'number'
+      ? Math.abs(candidate.age - viewer.age)
+      : null
+  const ageScore = ageDelta === null ? 0.6 : Math.max(0, 1 - ageDelta / 14)
+  const profileScore = candidate.bio.trim().length > 0 ? 1 : 0.5
+  const matchOpenScore = candidate.matchOpen ? 1 : 0.25
+
+  const weightedScore =
+    musicScore * 0.72 + ageScore * 0.16 + profileScore * 0.07 + matchOpenScore * 0.05
+
+  return {
+    score: Math.round(weightedScore * 100),
+    sharedTracks,
+    sharedArtists,
+    ageDelta,
+    matchOpenBoost: Math.round(matchOpenScore * 100),
   }
 }
 
@@ -573,12 +622,17 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const [items, setItems] = useState<Track[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<'discover' | 'liked' | 'community'>('discover')
+  const [tab, setTab] = useState<'discover' | 'liked' | 'dating' | 'community'>('discover')
   const [activeIndex, setActiveIndex] = useState(0)
   const [likedSongs, setLikedSongs] = useState<Track[]>([])
   const [dislikedCount, setDislikedCount] = useState(0)
   const [dragStartX, setDragStartX] = useState<number | null>(null)
   const [dragX, setDragX] = useState(0)
+  const [datingDragStartX, setDatingDragStartX] = useState<number | null>(null)
+  const [datingDragX, setDatingDragX] = useState(0)
+  const [datingLikedUserIds, setDatingLikedUserIds] = useState<string[]>([])
+  const [datingPassedUserIds, setDatingPassedUserIds] = useState<string[]>([])
+  const [datingMatchedUserIds, setDatingMatchedUserIds] = useState<string[]>([])
   const [socialUsers, setSocialUsers] = useState<SocialUser[]>([])
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
   const [chatInput, setChatInput] = useState('')
@@ -593,6 +647,25 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const currentTrack = items.length ? items[activeIndex % items.length] : null
   const selectedUser = socialUsers.find((u) => u.id === selectedUserId) || null
   const swipeLabel = dragX > 80 ? 'LIKE' : dragX < -80 ? 'PASS' : null
+  const datingSwipeLabel = datingDragX > 80 ? 'LIKE' : datingDragX < -80 ? 'PASS' : null
+  const datingCandidates = useMemo(() => {
+    return socialUsers
+      .filter((user) => user.id !== viewer.id)
+      .map((candidate) => ({
+        candidate,
+        compatibility: buildCompatibility(viewer, likedSongs, candidate),
+      }))
+      .sort((a, b) => b.compatibility.score - a.compatibility.score)
+  }, [likedSongs, socialUsers, viewer])
+  const remainingDatingCandidates = useMemo(
+    () =>
+      datingCandidates.filter(
+        ({ candidate }) =>
+          !datingLikedUserIds.includes(candidate.id) && !datingPassedUserIds.includes(candidate.id),
+      ),
+    [datingCandidates, datingLikedUserIds, datingPassedUserIds],
+  )
+  const activeDatingCandidate = remainingDatingCandidates[0] || null
 
   useEffect(() => {
     async function loadFeed() {
@@ -815,6 +888,50 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
     }
   }
 
+  async function handleDatingSwipe(action: 'like' | 'dislike') {
+    if (!activeDatingCandidate) return
+    const user = activeDatingCandidate.candidate
+    if (action === 'dislike') {
+      setDatingPassedUserIds((prev) => [...prev, user.id])
+      setDatingDragX(0)
+      return
+    }
+    if (!viewer.matchOpen) {
+      setSocialError('Your match mode is closed. Open it to like dating profiles.')
+      return
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/social/follow`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(sessionToken) },
+        body: JSON.stringify({
+          targetId: user.id,
+          action: user.isFollowing ? 'unfollow' : 'follow',
+        }),
+      })
+      if (!res.ok) throw new Error('dating like failed')
+      const data = (await res.json()) as { isFollowing: boolean; isMatched: boolean }
+      setSocialUsers((prev) =>
+        prev.map((candidate) =>
+          candidate.id === user.id
+            ? { ...candidate, isFollowing: data.isFollowing, isMatched: data.isMatched }
+            : candidate,
+        ),
+      )
+      if (data.isFollowing) {
+        setDatingLikedUserIds((prev) => [...prev, user.id])
+      } else {
+        setDatingPassedUserIds((prev) => [...prev, user.id])
+      }
+      if (data.isMatched) {
+        setDatingMatchedUserIds((prev) => (prev.includes(user.id) ? prev : [...prev, user.id]))
+      }
+      setDatingDragX(0)
+    } catch {
+      setSocialError('Could not like this dating profile right now.')
+    }
+  }
+
   const likesCount = likedSongs.length
   const actionSummary = useMemo(
     () => `${likesCount} liked · ${dislikedCount} passed`,
@@ -863,6 +980,13 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
           onClick={() => setTab('liked')}
         >
           Liked Music
+        </button>
+        <button
+          className={`tab-btn ${tab === 'dating' ? 'tab-btn-active' : ''}`}
+          type="button"
+          onClick={() => setTab('dating')}
+        >
+          Dating
         </button>
         <button
           className={`tab-btn ${tab === 'community' ? 'tab-btn-active' : ''}`}
@@ -953,6 +1077,114 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
               ))}
             </div>
           )}
+        </main>
+      )}
+
+      {tab === 'dating' && (
+        <main className="swipe-main">
+          {socialError && <p className="error-text">{socialError}</p>}
+          <section className="deck">
+            {!activeDatingCandidate ? (
+              <article className="swipe-card dating-card-empty">
+                <div className="cover-meta dating-meta">
+                  <h2 className="card-title">No more profiles for now</h2>
+                  <p className="card-artist">You went through all available dating profiles.</p>
+                  {datingMatchedUserIds.length > 0 && (
+                    <p className="card-album">
+                      {datingMatchedUserIds.length} music match
+                      {datingMatchedUserIds.length === 1 ? '' : 'es'} unlocked.
+                    </p>
+                  )}
+                </div>
+              </article>
+            ) : (
+              <article
+                className="swipe-card dating-swipe-card"
+                style={{
+                  transform: `translateX(${datingDragX}px) rotate(${datingDragX / 18}deg)`,
+                }}
+                onPointerDown={(event) => setDatingDragStartX(event.clientX)}
+                onPointerMove={(event) => {
+                  if (datingDragStartX === null) return
+                  setDatingDragX(event.clientX - datingDragStartX)
+                }}
+                onPointerUp={() => {
+                  if (datingDragX > 90) {
+                    handleDatingSwipe('like')
+                  } else if (datingDragX < -90) {
+                    handleDatingSwipe('dislike')
+                  } else {
+                    setDatingDragX(0)
+                  }
+                  setDatingDragStartX(null)
+                }}
+                onPointerCancel={() => {
+                  setDatingDragStartX(null)
+                  setDatingDragX(0)
+                }}
+              >
+                <div className="card-overlay-gradient" />
+                {datingSwipeLabel && (
+                  <div
+                    className={`swipe-chip ${datingSwipeLabel === 'LIKE' ? 'swipe-like' : 'swipe-pass'}`}
+                  >
+                    {datingSwipeLabel}
+                  </div>
+                )}
+                <div className="compat-pill">
+                  {activeDatingCandidate.compatibility.score}% compatible
+                  {activeDatingCandidate.compatibility.score >= 80
+                    ? ' · strong music fit'
+                    : activeDatingCandidate.compatibility.score >= 65
+                      ? ' · good fit'
+                      : ' · explore vibes'}
+                </div>
+                <div className="cover-meta dating-meta">
+                  <h2 className="card-title">
+                    {activeDatingCandidate.candidate.name}
+                    {typeof activeDatingCandidate.candidate.age === 'number'
+                      ? `, ${activeDatingCandidate.candidate.age}`
+                      : ''}
+                  </h2>
+                  <p className="card-artist">@{activeDatingCandidate.candidate.handle}</p>
+                  <p className="card-album">
+                    {activeDatingCandidate.candidate.bio || 'No bio yet. Let the music speak first.'}
+                  </p>
+                  <p className="song-artist">
+                    Shared songs: {activeDatingCandidate.compatibility.sharedTracks.length} · Shared artists:{' '}
+                    {activeDatingCandidate.compatibility.sharedArtists.length}
+                  </p>
+                  {activeDatingCandidate.compatibility.sharedTracks.length > 0 && (
+                    <div className="chips-row dating-shared-row">
+                      {activeDatingCandidate.compatibility.sharedTracks.slice(0, 3).map((track) => (
+                        <span key={`${activeDatingCandidate.candidate.id}-${track.id}`} className="chip">
+                          {track.title} · {track.artist}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {activeDatingCandidate.candidate.likedMusic.length > 0 && (
+                    <p className="song-artist">
+                      Recent likes: {activeDatingCandidate.candidate.likedMusic.slice(0, 3).map((song) => song.title).join(' · ')}
+                    </p>
+                  )}
+                </div>
+              </article>
+            )}
+            <div className="swipe-controls">
+              <button className="pass-btn" type="button" onClick={() => handleDatingSwipe('dislike')}>
+                Pass
+              </button>
+              <button
+                className="like-btn"
+                type="button"
+                onClick={() => handleDatingSwipe('like')}
+                disabled={!viewer.matchOpen}
+              >
+                Like Profile
+              </button>
+            </div>
+          </section>
         </main>
       )}
 

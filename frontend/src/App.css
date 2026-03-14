@@ -372,6 +372,37 @@
   gap: 10px;
 }
 
+.dating-swipe-card {
+  background: radial-gradient(circle at top, #2b1839, #0a0813);
+}
+
+.dating-card-empty {
+  min-height: 52vh;
+}
+
+.compat-pill {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffccf0;
+  background: rgba(255, 106, 213, 0.18);
+  border: 1px solid rgba(255, 106, 213, 0.38);
+  z-index: 7;
+}
+
+.dating-meta {
+  width: calc(100% - 24px);
+}
+
+.dating-shared-row {
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
 .pass-btn,
 .like-btn {
   border: none;
