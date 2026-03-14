@@ -53,37 +53,45 @@ type ViewerAccount = {
 }
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-const VIEWER_STORAGE_KEY = 'tune_time_viewer_id'
+const SESSION_STORAGE_KEY = 'tune_time_session_token'
 
 function getSurveyStorageKey(userId: string) {
   return `tune_time_survey_complete_${userId}`
 }
 
+function authHeaders(token: string) {
+  return {
+    Authorization: `Bearer ${token}`,
+  }
+}
+
 function App() {
   const [step, setStep] = useState<'account' | 'survey' | 'feed'>('account')
   const [viewer, setViewer] = useState<ViewerAccount | null>(null)
+  const [sessionToken, setSessionToken] = useState<string | null>(null)
   const [hydrating, setHydrating] = useState(true)
 
   useEffect(() => {
     async function restoreSession() {
-      const storedUserId = window.localStorage.getItem(VIEWER_STORAGE_KEY)
-      if (!storedUserId) {
+      const storedToken = window.localStorage.getItem(SESSION_STORAGE_KEY)
+      if (!storedToken) {
         setHydrating(false)
         return
       }
       try {
-        const res = await fetch(
-          `${API_BASE}/api/account/profile?userId=${encodeURIComponent(storedUserId)}`,
-        )
+        const res = await fetch(`${API_BASE}/api/account/session`, {
+          headers: authHeaders(storedToken),
+        })
         const data = (await res.json()) as { user?: ViewerAccount }
         if (!res.ok || !data.user) {
           throw new Error('session not found')
         }
+        setSessionToken(storedToken)
         setViewer(data.user)
         const hasSurvey = window.localStorage.getItem(getSurveyStorageKey(data.user.id)) === '1'
         setStep(hasSurvey ? 'feed' : 'survey')
       } catch {
-        window.localStorage.removeItem(VIEWER_STORAGE_KEY)
+        window.localStorage.removeItem(SESSION_STORAGE_KEY)
         setStep('account')
       } finally {
         setHydrating(false)
@@ -107,28 +115,35 @@ function App() {
     <div className="app-root">
       {step === 'account' ? (
         <AccountScreen
-          onAuthSuccess={(user) => {
-            window.localStorage.setItem(VIEWER_STORAGE_KEY, user.id)
+          onAuthSuccess={(user, token) => {
+            window.localStorage.setItem(SESSION_STORAGE_KEY, token)
+            setSessionToken(token)
             setViewer(user)
             const hasSurvey = window.localStorage.getItem(getSurveyStorageKey(user.id)) === '1'
             setStep(hasSurvey ? 'feed' : 'survey')
           }}
         />
-      ) : step === 'survey' && viewer ? (
+      ) : step === 'survey' && viewer && sessionToken ? (
         <SurveyScreen
-          viewerId={viewer.id}
+          sessionToken={sessionToken}
           onDone={() => {
             window.localStorage.setItem(getSurveyStorageKey(viewer.id), '1')
             setStep('feed')
           }}
         />
       ) : (
-        viewer && (
+        viewer && sessionToken && (
           <FeedScreen
             viewer={viewer}
+            sessionToken={sessionToken}
             onViewerUpdate={setViewer}
             onSignOut={() => {
-              window.localStorage.removeItem(VIEWER_STORAGE_KEY)
+              fetch(`${API_BASE}/api/account/logout`, {
+                method: 'POST',
+                headers: authHeaders(sessionToken),
+              }).catch(() => {})
+              window.localStorage.removeItem(SESSION_STORAGE_KEY)
+              setSessionToken(null)
               setViewer(null)
               setStep('account')
             }}
@@ -140,7 +155,7 @@ function App() {
 }
 
 type AccountScreenProps = {
-  onAuthSuccess: (user: ViewerAccount) => void
+  onAuthSuccess: (user: ViewerAccount, sessionToken: string) => void
 }
 
 function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
@@ -187,11 +202,15 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
           password,
         }),
       })
-      const data = (await res.json()) as { error?: string; user?: ViewerAccount }
-      if (!res.ok || !data.user) {
+      const data = (await res.json()) as {
+        error?: string
+        user?: ViewerAccount
+        sessionToken?: string
+      }
+      if (!res.ok || !data.user || !data.sessionToken) {
         throw new Error(data.error || 'Could not create account')
       }
-      onAuthSuccess(data.user)
+      onAuthSuccess(data.user, data.sessionToken)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not create account'
       setError(message)
@@ -214,11 +233,15 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ handle: signinHandle.trim(), password: signinPassword }),
       })
-      const data = (await res.json()) as { error?: string; user?: ViewerAccount }
-      if (!res.ok || !data.user) {
+      const data = (await res.json()) as {
+        error?: string
+        user?: ViewerAccount
+        sessionToken?: string
+      }
+      if (!res.ok || !data.user || !data.sessionToken) {
         throw new Error(data.error || 'Could not sign in')
       }
-      onAuthSuccess(data.user)
+      onAuthSuccess(data.user, data.sessionToken)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not sign in'
       setError(message)
@@ -369,11 +392,11 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
 }
 
 type SurveyProps = {
-  viewerId: string
+  sessionToken: string
   onDone: () => void
 }
 
-function SurveyScreen({ viewerId, onDone }: SurveyProps) {
+function SurveyScreen({ sessionToken, onDone }: SurveyProps) {
   const [query, setQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Track[]>([])
   const [loading, setLoading] = useState(false)
@@ -425,8 +448,8 @@ function SurveyScreen({ viewerId, onDone }: SurveyProps) {
     try {
       const res = await fetch(`${API_BASE}/api/survey`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: viewerId, seeds: selected, moods }),
+        headers: { 'Content-Type': 'application/json', ...authHeaders(sessionToken) },
+        body: JSON.stringify({ seeds: selected, moods }),
       })
       if (!res.ok) {
         throw new Error('Survey submit failed')
@@ -541,11 +564,12 @@ function SurveyScreen({ viewerId, onDone }: SurveyProps) {
 
 type FeedScreenProps = {
   viewer: ViewerAccount
+  sessionToken: string
   onViewerUpdate: (next: ViewerAccount) => void
   onSignOut: () => void
 }
 
-function FeedScreen({ viewer, onViewerUpdate, onSignOut }: FeedScreenProps) {
+function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScreenProps) {
   const [items, setItems] = useState<Track[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -589,7 +613,9 @@ function FeedScreen({ viewer, onViewerUpdate, onSignOut }: FeedScreenProps) {
     async function loadSocialUsers() {
       setSocialError(null)
       try {
-        const res = await fetch(`${API_BASE}/api/social/users?viewerId=${viewer.id}`)
+        const res = await fetch(`${API_BASE}/api/social/users`, {
+          headers: authHeaders(sessionToken),
+        })
         if (!res.ok) throw new Error('Social load failed')
         const data = (await res.json()) as { users: SocialUser[] }
         setSocialUsers(data.users)
@@ -603,7 +629,7 @@ function FeedScreen({ viewer, onViewerUpdate, onSignOut }: FeedScreenProps) {
 
     loadFeed()
     loadSocialUsers()
-  }, [viewer.id])
+  }, [sessionToken])
 
   useEffect(() => {
     if (!selectedUserId) return
@@ -611,7 +637,10 @@ function FeedScreen({ viewer, onViewerUpdate, onSignOut }: FeedScreenProps) {
     async function loadMessages() {
       try {
         const res = await fetch(
-          `${API_BASE}/api/social/messages?viewerId=${viewer.id}&withUserId=${selectedUserId}`,
+          `${API_BASE}/api/social/messages?withUserId=${selectedUserId}`,
+          {
+            headers: authHeaders(sessionToken),
+          },
         )
         if (!res.ok) throw new Error('Chat load failed')
         const data = (await res.json()) as { messages: ChatMessage[] }
@@ -622,7 +651,7 @@ function FeedScreen({ viewer, onViewerUpdate, onSignOut }: FeedScreenProps) {
     }
 
     loadMessages()
-  }, [selectedUserId, viewer.id])
+  }, [selectedUserId, sessionToken])
 
   useEffect(() => {
     if (!audioRef.current) {
@@ -707,8 +736,8 @@ function FeedScreen({ viewer, onViewerUpdate, onSignOut }: FeedScreenProps) {
       })
       fetch(`${API_BASE}/api/social/like`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: viewer.id, track: currentTrack }),
+        headers: { 'Content-Type': 'application/json', ...authHeaders(sessionToken) },
+        body: JSON.stringify({ track: currentTrack }),
       }).catch(() => {})
     } else {
       setDislikedCount((prev) => prev + 1)
@@ -725,9 +754,8 @@ function FeedScreen({ viewer, onViewerUpdate, onSignOut }: FeedScreenProps) {
     try {
       const res = await fetch(`${API_BASE}/api/social/follow`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders(sessionToken) },
         body: JSON.stringify({
-          viewerId: viewer.id,
           targetId: user.id,
           action: user.isFollowing ? 'unfollow' : 'follow',
         }),
@@ -756,9 +784,8 @@ function FeedScreen({ viewer, onViewerUpdate, onSignOut }: FeedScreenProps) {
     try {
       const res = await fetch(`${API_BASE}/api/social/messages`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders(sessionToken) },
         body: JSON.stringify({
-          fromId: viewer.id,
           toId: selectedUser.id,
           text: chatInput.trim(),
         }),
@@ -777,8 +804,8 @@ function FeedScreen({ viewer, onViewerUpdate, onSignOut }: FeedScreenProps) {
       const nextMatchOpen = !viewer.matchOpen
       const res = await fetch(`${API_BASE}/api/account/match-mode`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: viewer.id, matchOpen: nextMatchOpen }),
+        headers: { 'Content-Type': 'application/json', ...authHeaders(sessionToken) },
+        body: JSON.stringify({ matchOpen: nextMatchOpen }),
       })
       if (!res.ok) throw new Error('mode update failed')
       const data = (await res.json()) as { matchOpen: boolean }

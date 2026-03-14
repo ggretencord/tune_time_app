@@ -4,7 +4,7 @@ const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 4010;
-const DEFAULT_VIEWER_ID = 'you';
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 
 app.use(cors());
 app.use(express.json());
@@ -67,6 +67,7 @@ const socialFollows = new Map([
   ['milo', new Set()],
   ['jules', new Set()],
 ]);
+const sessions = new Map();
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16);
@@ -83,6 +84,36 @@ function verifyPassword(password, storedHash) {
   const actual = crypto.scryptSync(password, salt, expected.length);
   if (actual.length !== expected.length) return false;
   return crypto.timingSafeEqual(actual, expected);
+}
+
+function createSession(userId) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = Date.now() + SESSION_TTL_MS;
+  sessions.set(token, { userId, expiresAt });
+  return token;
+}
+
+function extractToken(req) {
+  const authHeader = String(req.headers.authorization || '');
+  if (authHeader.startsWith('Bearer ')) {
+    return authHeader.slice('Bearer '.length).trim();
+  }
+  return '';
+}
+
+function requireAuth(req, res, next) {
+  const token = extractToken(req);
+  if (!token || !sessions.has(token)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const session = sessions.get(token);
+  if (session.expiresAt < Date.now()) {
+    sessions.delete(token);
+    return res.status(401).json({ error: 'Session expired' });
+  }
+  req.authToken = token;
+  req.authUserId = session.userId;
+  return next();
 }
 
 function initializeSeedPasswords() {
@@ -212,7 +243,7 @@ app.get('/api/search', async (req, res) => {
 });
 
 // Save survey: list of seed tracks and selected moods/genres
-app.post('/api/survey', (req, res) => {
+app.post('/api/survey', requireAuth, (req, res) => {
   const { seeds, moods } = req.body || {};
   if (!Array.isArray(seeds) || seeds.length === 0) {
     return res.status(400).json({ error: 'seeds must be a non-empty array' });
@@ -269,7 +300,8 @@ app.post('/api/account/register', (req, res) => {
   });
   ensureSocialUser(userId);
 
-  return res.status(201).json({ user: toViewerAccount(socialProfiles.get(userId)) });
+  const sessionToken = createSession(userId);
+  return res.status(201).json({ user: toViewerAccount(socialProfiles.get(userId)), sessionToken });
 });
 
 app.post('/api/account/login', (req, res) => {
@@ -294,24 +326,35 @@ app.post('/api/account/login', (req, res) => {
   }
 
   ensureSocialUser(profile.id);
+  const sessionToken = createSession(profile.id);
+  return res.json({ user: toViewerAccount(profile), sessionToken });
+});
+
+app.get('/api/account/session', requireAuth, (req, res) => {
+  const profile = socialProfiles.get(req.authUserId);
+  if (!profile) {
+    return res.status(404).json({ error: 'User not found' });
+  }
   return res.json({ user: toViewerAccount(profile) });
 });
 
-app.post('/api/account/match-mode', (req, res) => {
-  const { userId, matchOpen } = req.body || {};
-  const user = String(userId || '').trim();
-  if (!user || !socialProfiles.has(user)) {
-    return res.status(404).json({ error: 'User not found' });
-  }
+app.post('/api/account/logout', requireAuth, (req, res) => {
+  sessions.delete(req.authToken);
+  return res.json({ ok: true });
+});
+
+app.post('/api/account/match-mode', requireAuth, (req, res) => {
+  const { matchOpen } = req.body || {};
+  const user = req.authUserId;
   const profile = socialProfiles.get(user);
   profile.matchOpen = Boolean(matchOpen);
   socialProfiles.set(user, profile);
   return res.json({ ok: true, matchOpen: profile.matchOpen });
 });
 
-app.get('/api/account/profile', (req, res) => {
-  const userId = String(req.query.userId || '').trim();
-  if (!userId || !socialProfiles.has(userId)) {
+app.get('/api/account/profile', requireAuth, (req, res) => {
+  const userId = req.authUserId;
+  if (!socialProfiles.has(userId)) {
     return res.status(404).json({ error: 'User not found' });
   }
   const profile = socialProfiles.get(userId);
@@ -397,8 +440,8 @@ async function seedSocialLikes() {
 }
 
 // Social graph and messaging endpoints
-app.get('/api/social/users', (req, res) => {
-  const viewerId = String(req.query.viewerId || DEFAULT_VIEWER_ID).trim() || DEFAULT_VIEWER_ID;
+app.get('/api/social/users', requireAuth, (req, res) => {
+  const viewerId = req.authUserId;
   ensureSocialUser(viewerId);
   const users = Array.from(socialProfiles.values())
     .filter((profile) => profile.id !== viewerId)
@@ -406,9 +449,9 @@ app.get('/api/social/users', (req, res) => {
   res.json({ users });
 });
 
-app.post('/api/social/follow', (req, res) => {
-  const { viewerId, targetId, action } = req.body || {};
-  const viewer = String(viewerId || '').trim();
+app.post('/api/social/follow', requireAuth, (req, res) => {
+  const { targetId, action } = req.body || {};
+  const viewer = req.authUserId;
   const target = String(targetId || '').trim();
   if (!viewer || !target || viewer === target) {
     return res.status(400).json({ error: 'viewerId and targetId are required and must differ' });
@@ -435,11 +478,11 @@ app.post('/api/social/follow', (req, res) => {
   });
 });
 
-app.post('/api/social/like', (req, res) => {
-  const { userId, track } = req.body || {};
-  const user = String(userId || '').trim();
+app.post('/api/social/like', requireAuth, (req, res) => {
+  const { track } = req.body || {};
+  const user = req.authUserId;
   if (!user || !track || !track.id) {
-    return res.status(400).json({ error: 'userId and valid track are required' });
+    return res.status(400).json({ error: 'A valid track is required' });
   }
   ensureSocialUser(user);
   const likes = socialLikes.get(user) || [];
@@ -459,8 +502,8 @@ app.post('/api/social/like', (req, res) => {
   return res.json({ ok: true, likedMusic: socialLikes.get(user) });
 });
 
-app.get('/api/social/messages', (req, res) => {
-  const viewerId = String(req.query.viewerId || '').trim();
+app.get('/api/social/messages', requireAuth, (req, res) => {
+  const viewerId = req.authUserId;
   const withUserId = String(req.query.withUserId || '').trim();
   if (!viewerId || !withUserId) {
     return res.status(400).json({ error: 'viewerId and withUserId are required' });
@@ -477,9 +520,9 @@ app.get('/api/social/messages', (req, res) => {
   return res.json({ messages });
 });
 
-app.post('/api/social/messages', (req, res) => {
-  const { fromId, toId, text } = req.body || {};
-  const sender = String(fromId || '').trim();
+app.post('/api/social/messages', requireAuth, (req, res) => {
+  const { toId, text } = req.body || {};
+  const sender = req.authUserId;
   const recipient = String(toId || '').trim();
   const body = String(text || '').trim();
   if (!sender || !recipient || !body) {
