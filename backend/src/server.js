@@ -10,7 +10,7 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '8mb' }));
 
 // In-memory store for survey preferences (per session would be better; this is demo-only)
 let latestSurvey = null;
@@ -861,6 +861,20 @@ seedSocialLikes()
     console.error('Failed to seed social likes:', err);
   })
   .finally(() => {
+    app.use('/api', (req, res) => {
+      return res.status(404).json({ error: 'API route not found' });
+    });
+
+    app.use((err, req, res, next) => {
+      if (res.headersSent) return next(err);
+      if (err?.type === 'entity.too.large') {
+        return res.status(413).json({ error: 'Request body too large (max 8MB)' });
+      }
+      // eslint-disable-next-line no-console
+      console.error('Unhandled API error:', err);
+      return res.status(500).json({ error: 'Internal server error' });
+    });
+
     app.listen(PORT, () => {
       // eslint-disable-next-line no-console
       console.log(`Backend listening on http://localhost:${PORT}`);

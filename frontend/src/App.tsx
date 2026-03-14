@@ -108,6 +108,32 @@ function fileToDataUrl(file: File) {
   })
 }
 
+async function parseResponseJsonSafe<T>(res: Response): Promise<T | null> {
+  const contentType = res.headers.get('content-type') || ''
+  if (!contentType.toLowerCase().includes('application/json')) {
+    return null
+  }
+  try {
+    return (await res.clone().json()) as T
+  } catch {
+    return null
+  }
+}
+
+async function readApiErrorMessage(res: Response, fallback: string) {
+  const parsed = await parseResponseJsonSafe<{ error?: string }>(res)
+  if (parsed?.error) return parsed.error
+  try {
+    const text = await res.clone().text()
+    if (text && !text.trim().startsWith('<')) {
+      return text.slice(0, 180)
+    }
+  } catch {
+    // Ignore text extraction issues and use fallback.
+  }
+  return fallback
+}
+
 function uniqueLowercase(values: string[]) {
   return new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean))
 }
@@ -340,13 +366,13 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
           profileImageData: profilePhotoData,
         }),
       })
-      const data = (await res.json()) as {
+      const data = await parseResponseJsonSafe<{
         error?: string
         user?: ViewerAccount
         sessionToken?: string
-      }
-      if (!res.ok || !data.user || !data.sessionToken) {
-        throw new Error(data.error || 'Could not create account')
+      }>(res)
+      if (!res.ok || !data?.user || !data?.sessionToken) {
+        throw new Error(await readApiErrorMessage(res, 'Could not create account'))
       }
       onAuthSuccess(data.user, data.sessionToken)
     } catch (err) {
@@ -371,13 +397,13 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ handle: signinHandle.trim(), password: signinPassword }),
       })
-      const data = (await res.json()) as {
+      const data = await parseResponseJsonSafe<{
         error?: string
         user?: ViewerAccount
         sessionToken?: string
-      }
-      if (!res.ok || !data.user || !data.sessionToken) {
-        throw new Error(data.error || 'Could not sign in')
+      }>(res)
+      if (!res.ok || !data?.user || !data?.sessionToken) {
+        throw new Error(await readApiErrorMessage(res, 'Could not sign in'))
       }
       onAuthSuccess(data.user, data.sessionToken)
     } catch (err) {
@@ -813,9 +839,9 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
         headers: { 'Content-Type': 'application/json', ...authHeaders(sessionToken) },
         body: JSON.stringify({ profileImageData }),
       })
-      const data = (await res.json()) as { error?: string; user?: ViewerAccount }
-      if (!res.ok || !data.user) {
-        throw new Error(data.error || 'Could not update profile photo')
+      const data = await parseResponseJsonSafe<{ error?: string; user?: ViewerAccount }>(res)
+      if (!res.ok || !data?.user) {
+        throw new Error(await readApiErrorMessage(res, 'Could not update profile photo'))
       }
       onViewerUpdate(data.user)
       setSocialError(null)
@@ -864,9 +890,9 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
           caption: photoDraftCaption,
         }),
       })
-      const data = (await res.json()) as { error?: string; post?: PhotoPost }
-      if (!res.ok || !data.post) {
-        throw new Error(data.error || 'Could not create photo post')
+      const data = await parseResponseJsonSafe<{ error?: string; post?: PhotoPost }>(res)
+      if (!res.ok || !data?.post) {
+        throw new Error(await readApiErrorMessage(res, 'Could not create photo post'))
       }
       setPhotoPosts((prev) => [data.post as PhotoPost, ...prev])
       setPhotoActiveIndex(0)
@@ -929,9 +955,9 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
         const res = await fetch(`${API_BASE}/api/social/photo-posts`, {
           headers: authHeaders(sessionToken),
         })
-        if (!res.ok) throw new Error('Photo feed load failed')
-        const data = (await res.json()) as { posts: PhotoPost[] }
-        setPhotoPosts(data.posts)
+        if (!res.ok) throw new Error(await readApiErrorMessage(res, 'Photo feed load failed'))
+        const data = await parseResponseJsonSafe<{ posts?: PhotoPost[] }>(res)
+        setPhotoPosts(Array.isArray(data?.posts) ? data.posts : [])
         setPhotoActiveIndex(0)
       } catch {
         setPhotoThreadError('Could not load photo thread right now.')
