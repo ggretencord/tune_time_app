@@ -280,6 +280,7 @@
   gap: 8px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border-subtle);
+  overflow-x: auto;
 }
 
 .account-mode-tabs {
@@ -523,6 +524,12 @@
   flex-shrink: 0;
 }
 
+.list-row-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
 .list-row + .list-row,
 .user-row + .user-row {
   border-top: 1px solid rgba(255, 255, 255, 0.05);
@@ -536,6 +543,10 @@
 
 .community-users {
   margin-bottom: 12px;
+}
+
+.messages-intro {
+  margin: -4px 0 10px;
 }
 
 .user-row {
@@ -622,6 +633,9 @@
   padding: 7px 10px;
   font-size: 13px;
   line-height: 1.35;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .chat-me {
@@ -640,6 +654,45 @@
   grid-template-columns: 1fr auto;
   gap: 8px;
   margin-top: 10px;
+}
+
+.chat-track-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: rgba(5, 5, 9, 0.55);
+  color: inherit;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-track-card:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.chat-track-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.song-share-list {
+  margin-top: 10px;
+}
+
+.quick-share-strip {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: rgba(8, 8, 16, 0.9);
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .photo-compose-card {

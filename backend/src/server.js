@@ -331,6 +331,7 @@ function toSocialUser(viewerId, profile) {
   const viewerProfile = socialProfiles.get(viewerId);
   const viewerFollowsTarget = socialFollows.get(viewerId).has(profile.id);
   const targetFollowsViewer = socialFollows.get(profile.id).has(viewerId);
+  const isMutualFollow = viewerFollowsTarget && targetFollowsViewer;
   return {
     id: profile.id,
     name: profile.name,
@@ -347,6 +348,8 @@ function toSocialUser(viewerId, profile) {
     ),
     likedMusic: socialLikes.get(profile.id) || [],
     isFollowing: viewerFollowsTarget,
+    followsYou: targetFollowsViewer,
+    isMutualFollow,
   };
 }
 
@@ -687,14 +690,18 @@ app.post('/api/social/follow', requireAuth, (req, res) => {
   }
   const viewerProfile = socialProfiles.get(viewer);
   const targetProfile = socialProfiles.get(target);
+  const targetFollowsViewer = socialFollows.get(target).has(viewer);
+  const isFollowing = following.has(target);
   return res.json({
     ok: true,
-    isFollowing: following.has(target),
+    isFollowing,
+    followsYou: targetFollowsViewer,
+    isMutualFollow: isFollowing && targetFollowsViewer,
     isMatched: isMutualMatch(
       viewerProfile,
       targetProfile,
-      following.has(target),
-      socialFollows.get(target).has(viewer)
+      isFollowing,
+      targetFollowsViewer
     ),
   });
 });
@@ -742,12 +749,27 @@ app.get('/api/social/messages', requireAuth, (req, res) => {
 });
 
 app.post('/api/social/messages', requireAuth, (req, res) => {
-  const { toId, text } = req.body || {};
+  const { toId, text, track } = req.body || {};
   const sender = req.authUserId;
   const recipient = String(toId || '').trim();
   const body = String(text || '').trim();
-  if (!sender || !recipient || !body) {
-    return res.status(400).json({ error: 'fromId, toId, and text are required' });
+  const normalizedTrack =
+    track && track.id
+      ? {
+          id: String(track.id),
+          title: String(track.title || ''),
+          artist: String(track.artist || ''),
+          album: track.album ? String(track.album) : undefined,
+          artworkUrl: track.artworkUrl ? String(track.artworkUrl) : undefined,
+          previewUrl: String(track.previewUrl || ''),
+          genre: track.genre ? String(track.genre) : undefined,
+        }
+      : null;
+  if (!sender || !recipient || (!body && !normalizedTrack)) {
+    return res.status(400).json({ error: 'toId and either text or track are required' });
+  }
+  if (normalizedTrack && (!normalizedTrack.title || !normalizedTrack.artist)) {
+    return res.status(400).json({ error: 'track must include id, title, and artist' });
   }
   ensureSocialUser(sender);
   ensureSocialUser(recipient);
@@ -770,7 +792,8 @@ app.post('/api/social/messages', requireAuth, (req, res) => {
     id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     fromId: sender,
     toId: recipient,
-    text: body,
+    text: body || (normalizedTrack ? `Shared a song: ${normalizedTrack.title} - ${normalizedTrack.artist}` : ''),
+    sharedTrack: normalizedTrack,
     sentAt: Date.now(),
   };
   socialMessages.push(message);

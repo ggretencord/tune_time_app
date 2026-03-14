@@ -34,6 +34,8 @@ type SocialUser = {
   isMatched: boolean
   likedMusic: Track[]
   isFollowing: boolean
+  followsYou: boolean
+  isMutualFollow: boolean
 }
 
 type ChatMessage = {
@@ -42,6 +44,7 @@ type ChatMessage = {
   toId: string
   text: string
   sentAt: number
+  sharedTrack?: Track
 }
 
 type ViewerAccount = {
@@ -747,7 +750,9 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const [items, setItems] = useState<Track[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<'discover' | 'liked' | 'dating' | 'photos' | 'community'>('discover')
+  const [tab, setTab] = useState<
+    'discover' | 'liked' | 'dating' | 'photos' | 'community' | 'messages'
+  >('discover')
   const [activeIndex, setActiveIndex] = useState(0)
   const [likedSongs, setLikedSongs] = useState<Track[]>([])
   const [dislikedCount, setDislikedCount] = useState(0)
@@ -787,6 +792,14 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
 
   const currentTrack = items.length ? items[activeIndex % items.length] : null
   const selectedUser = socialUsers.find((u) => u.id === selectedUserId) || null
+  const canMessageSelectedUser = Boolean(viewer.matchOpen && selectedUser?.isMatched)
+  const songShareHint = !selectedUser
+    ? 'Pick someone in Community to choose who gets your shared songs.'
+    : canMessageSelectedUser
+      ? `Sharing sends to ${selectedUser.name}.`
+      : viewer.matchOpen
+        ? `Match with ${selectedUser.name} to share songs.`
+        : 'Open your match mode to share songs.'
   const swipeLabel = dragX > 80 ? 'LIKE' : dragX < -80 ? 'PASS' : null
   const datingSwipeLabel = datingDragX > 80 ? 'LIKE' : datingDragX < -80 ? 'PASS' : null
   const photoSwipeLabel = photoDragX > 80 ? 'NEXT' : photoDragX < -80 ? 'BACK' : null
@@ -800,6 +813,16 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
       }))
       .sort((a, b) => b.compatibility.score - a.compatibility.score)
   }, [likedSongs, socialUsers, viewer])
+  const messagingConnections = useMemo(
+    () =>
+      socialUsers
+        .filter((user) => user.isMutualFollow || user.isMatched)
+        .sort((a, b) => {
+          if (a.isMatched !== b.isMatched) return a.isMatched ? -1 : 1
+          return a.name.localeCompare(b.name)
+        }),
+    [socialUsers],
+  )
   const remainingDatingCandidates = useMemo(
     () =>
       datingCandidates.filter(
@@ -944,9 +967,15 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
         if (!res.ok) throw new Error('Social load failed')
         const data = (await res.json()) as { users: SocialUser[] }
         setSocialUsers(data.users)
-        if (data.users.length) {
-          setSelectedUserId((prev) => prev || data.users[0].id)
-        }
+        const preferredUserId =
+          data.users.find((user) => user.isMatched || user.isMutualFollow)?.id ||
+          data.users[0]?.id ||
+          null
+        setSelectedUserId((prev) => {
+          if (!data.users.length) return null
+          if (prev && data.users.some((user) => user.id === prev)) return prev
+          return preferredUserId
+        })
       } catch {
         setSocialError('Could not load community right now.')
       }
@@ -1146,11 +1175,22 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
         }),
       })
       if (!res.ok) throw new Error('follow failed')
-      const data = (await res.json()) as { isFollowing: boolean; isMatched: boolean }
+      const data = (await res.json()) as {
+        isFollowing: boolean
+        followsYou: boolean
+        isMutualFollow: boolean
+        isMatched: boolean
+      }
       setSocialUsers((prev) =>
         prev.map((candidate) =>
           candidate.id === user.id
-            ? { ...candidate, isFollowing: data.isFollowing, isMatched: data.isMatched }
+            ? {
+                ...candidate,
+                isFollowing: data.isFollowing,
+                followsYou: data.followsYou,
+                isMutualFollow: data.isMutualFollow,
+                isMatched: data.isMatched,
+              }
             : candidate,
         ),
       )
@@ -1181,6 +1221,34 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
       setChatInput('')
     } catch {
       setSocialError('Could not send your message.')
+    }
+  }
+
+  async function handleSendSong(track: Track) {
+    if (!selectedUser) return
+    if (!viewer.matchOpen || !selectedUser.isMatched) {
+      setSocialError('Song sharing is available only when you are matched and match mode is open.')
+      return
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/social/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(sessionToken) },
+        body: JSON.stringify({
+          toId: selectedUser.id,
+          track,
+        }),
+      })
+      const data = await parseResponseJsonSafe<{ error?: string; message?: ChatMessage }>(res)
+      const sentMessage = data?.message
+      if (!res.ok || !sentMessage) {
+        throw new Error(await readApiErrorMessage(res, 'Could not share that song.'))
+      }
+      setMessages((prev) => [...prev, sentMessage])
+      setSocialError(null)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not share that song.'
+      setSocialError(message)
     }
   }
 
@@ -1356,6 +1424,13 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
         >
           Community
         </button>
+        <button
+          className={`tab-btn ${tab === 'messages' ? 'tab-btn-active' : ''}`}
+          type="button"
+          onClick={() => setTab('messages')}
+        >
+          Messages
+        </button>
       </nav>
 
       {tab === 'discover' && currentTrack && (
@@ -1413,6 +1488,17 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
                 Swipe Right
               </button>
             </div>
+            <div className="quick-share-strip">
+              <p className="song-artist">{songShareHint}</p>
+              <button
+                className="mini-btn"
+                type="button"
+                onClick={() => handleSendSong(currentTrack)}
+                disabled={!canMessageSelectedUser}
+              >
+                {selectedUser ? `Send to ${selectedUser.name}` : 'Send song'}
+              </button>
+            </div>
           </section>
         </main>
       )}
@@ -1434,9 +1520,19 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
                       {song.album ? ` • ${song.album}` : ''}
                     </span>
                   </div>
-                  <button className="mini-btn list-row-action" type="button" onClick={() => handlePlay(song)}>
-                    {activeId === song.id ? 'Pause Clip' : 'Play Clip'}
-                  </button>
+                  <div className="list-row-actions">
+                    <button className="mini-btn list-row-action" type="button" onClick={() => handlePlay(song)}>
+                      {activeId === song.id ? 'Pause Clip' : 'Play Clip'}
+                    </button>
+                    <button
+                      className="mini-btn list-row-action"
+                      type="button"
+                      onClick={() => handleSendSong(song)}
+                      disabled={!canMessageSelectedUser}
+                    >
+                      Send song
+                    </button>
+                  </div>
                 </article>
               ))}
             </div>
@@ -1790,14 +1886,70 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
                   {messages.length === 0 ? (
                     <p className="empty-text">No messages yet. Say hi.</p>
                   ) : (
-                    messages.map((message) => (
-                      <p
-                        key={message.id}
-                        className={`chat-bubble ${message.fromId === viewer.id ? 'chat-me' : 'chat-them'}`}
-                      >
-                        {message.text}
-                      </p>
-                    ))
+                    messages.map((message) => {
+                      const sharedTrack = message.sharedTrack
+                      return (
+                        <div
+                          key={message.id}
+                          className={`chat-bubble ${message.fromId === viewer.id ? 'chat-me' : 'chat-them'}`}
+                        >
+                          {message.text && <span>{message.text}</span>}
+                          {sharedTrack && (
+                            <button
+                              className="chat-track-card"
+                              type="button"
+                              onClick={() => handlePlay(sharedTrack)}
+                              disabled={!sharedTrack.previewUrl}
+                            >
+                              {sharedTrack.artworkUrl && (
+                                <img src={sharedTrack.artworkUrl} alt="" className="result-artwork" />
+                              )}
+                              <span className="chat-track-meta">
+                                <span className="song-title">{sharedTrack.title}</span>
+                                <span className="song-artist">
+                                  {sharedTrack.artist}
+                                  {sharedTrack.album ? ` • ${sharedTrack.album}` : ''}
+                                </span>
+                              </span>
+                              <span className="result-badge">
+                                {activeId === sharedTrack.id ? 'Pause Clip' : 'Play Clip'}
+                              </span>
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+                <div className="song-share-list">
+                  <p className="song-artist">Share one of your liked songs</p>
+                  {likedSongs.length === 0 ? (
+                    <p className="empty-text">
+                      Like songs in Discover first, then send them to people you match with.
+                    </p>
+                  ) : (
+                    <div className="list">
+                      {likedSongs.slice(0, 6).map((song) => (
+                        <article key={`share-${song.id}`} className="list-row">
+                          {song.artworkUrl && <img src={song.artworkUrl} alt="" className="result-artwork" />}
+                          <div className="result-meta">
+                            <span className="song-title">{song.title}</span>
+                            <span className="song-artist">
+                              {song.artist}
+                              {song.album ? ` • ${song.album}` : ''}
+                            </span>
+                          </div>
+                          <button
+                            className="mini-btn list-row-action"
+                            type="button"
+                            onClick={() => handleSendSong(song)}
+                            disabled={!canMessageSelectedUser}
+                          >
+                            Send song
+                          </button>
+                        </article>
+                      ))}
+                    </div>
                   )}
                 </div>
                 <form className="chat-form" onSubmit={handleSendMessage}>
@@ -1806,18 +1958,148 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                     placeholder="Type a message"
-                    disabled={!viewer.matchOpen || !selectedUser.isMatched}
+                    disabled={!canMessageSelectedUser}
                   />
                   <button
                     className="primary-btn"
                     type="submit"
-                    disabled={!viewer.matchOpen || !selectedUser.isMatched}
+                    disabled={!canMessageSelectedUser}
                   >
                     Send
                   </button>
                 </form>
               </section>
             </>
+          )}
+        </main>
+      )}
+
+      {tab === 'messages' && (
+        <main className="community-main">
+          {socialError && <p className="error-text">{socialError}</p>}
+          <section className="community-users">
+            <h2 className="panel-title">Messaging</h2>
+            <p className="song-artist messages-intro">
+              Mutual followers and matches only. Sent songs appear in each thread.
+            </p>
+            {messagingConnections.length === 0 ? (
+              <p className="empty-text">
+                No mutual followers yet. Follow each other first, then open match mode to start chatting.
+              </p>
+            ) : (
+              <div className="list">
+                {messagingConnections.map((user) => (
+                  <button
+                    key={`message-${user.id}`}
+                    className={`user-row ${selectedUserId === user.id ? 'user-row-active' : ''}`}
+                    type="button"
+                    onClick={() => setSelectedUserId(user.id)}
+                  >
+                    <img src={user.profileImageUrl} alt="" className="avatar-thumb" />
+                    <div className="result-meta">
+                      <span className="song-title">
+                        {user.name} <span className="user-handle">@{user.handle}</span>
+                      </span>
+                      <span className="song-artist">
+                        {user.isMatched ? 'Matched' : 'Mutual follower'} · {user.likedMusic.length} likes
+                      </span>
+                    </div>
+                    <span className="result-badge">{user.isMatched ? 'Can message' : 'Waiting match open'}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {selectedUser && messagingConnections.some((user) => user.id === selectedUser.id) && (
+            <section className="community-chat">
+              <h3 className="section-title">Message {selectedUser.name}</h3>
+              {!selectedUser.isMatched && (
+                <p className="empty-text">Both of you need match mode open before messages can be sent.</p>
+              )}
+              <div className="chat-box">
+                {messages.length === 0 ? (
+                  <p className="empty-text">No messages yet. Say hi.</p>
+                ) : (
+                  messages.map((message) => {
+                    const sharedTrack = message.sharedTrack
+                    return (
+                      <div
+                        key={`message-thread-${message.id}`}
+                        className={`chat-bubble ${message.fromId === viewer.id ? 'chat-me' : 'chat-them'}`}
+                      >
+                        {message.text && <span>{message.text}</span>}
+                        {sharedTrack && (
+                          <button
+                            className="chat-track-card"
+                            type="button"
+                            onClick={() => handlePlay(sharedTrack)}
+                            disabled={!sharedTrack.previewUrl}
+                          >
+                            {sharedTrack.artworkUrl && (
+                              <img src={sharedTrack.artworkUrl} alt="" className="result-artwork" />
+                            )}
+                            <span className="chat-track-meta">
+                              <span className="song-title">{sharedTrack.title}</span>
+                              <span className="song-artist">
+                                {sharedTrack.artist}
+                                {sharedTrack.album ? ` • ${sharedTrack.album}` : ''}
+                              </span>
+                            </span>
+                            <span className="result-badge">
+                              {activeId === sharedTrack.id ? 'Pause Clip' : 'Play Clip'}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+              <div className="song-share-list">
+                <p className="song-artist">Share one of your liked songs</p>
+                {likedSongs.length === 0 ? (
+                  <p className="empty-text">
+                    Like songs in Discover first, then send them to people you match with.
+                  </p>
+                ) : (
+                  <div className="list">
+                    {likedSongs.slice(0, 6).map((song) => (
+                      <article key={`message-share-${song.id}`} className="list-row">
+                        {song.artworkUrl && <img src={song.artworkUrl} alt="" className="result-artwork" />}
+                        <div className="result-meta">
+                          <span className="song-title">{song.title}</span>
+                          <span className="song-artist">
+                            {song.artist}
+                            {song.album ? ` • ${song.album}` : ''}
+                          </span>
+                        </div>
+                        <button
+                          className="mini-btn list-row-action"
+                          type="button"
+                          onClick={() => handleSendSong(song)}
+                          disabled={!canMessageSelectedUser}
+                        >
+                          Send song
+                        </button>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <form className="chat-form" onSubmit={handleSendMessage}>
+                <input
+                  className="search-input"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Type a message"
+                  disabled={!canMessageSelectedUser}
+                />
+                <button className="primary-btn" type="submit" disabled={!canMessageSelectedUser}>
+                  Send
+                </button>
+              </form>
+            </section>
           )}
         </main>
       )}
