@@ -615,10 +615,6 @@ function SurveyScreen({ sessionToken, onDone }: SurveyProps) {
   }
 
   async function handleSubmit() {
-    if (!selected.length) {
-      setError('Pick at least one song to start.')
-      return
-    }
     setSubmitting(true)
     setError(null)
     try {
@@ -649,7 +645,9 @@ function SurveyScreen({ sessionToken, onDone }: SurveyProps) {
 
       <main className="content">
         <h1 className="title">Tell us what you like</h1>
-        <p className="subtitle">Search a few songs you love to seed your feed.</p>
+        <p className="subtitle">
+          Pick songs, pick moods, or skip both to build your feed from previous likes.
+        </p>
 
         <form className="search-form" onSubmit={handleSearch}>
           <input
@@ -920,7 +918,9 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
       setLoading(true)
       setError(null)
       try {
-        const res = await fetch(`${API_BASE}/api/feed`)
+        const res = await fetch(`${API_BASE}/api/feed`, {
+          headers: authHeaders(sessionToken),
+        })
         if (!res.ok) throw new Error('Feed failed')
         const data = (await res.json()) as { items: Track[] }
         setItems(data.items)

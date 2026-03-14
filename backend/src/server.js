@@ -12,8 +12,8 @@ const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp
 app.use(cors());
 app.use(express.json({ limit: '8mb' }));
 
-// In-memory store for survey preferences (per session would be better; this is demo-only)
-let latestSurvey = null;
+// In-memory store for survey preferences, scoped per user.
+const latestSurveyByUser = new Map();
 let socialMessages = [];
 let socialPhotoPosts = [];
 
@@ -395,14 +395,31 @@ app.get('/api/search', async (req, res) => {
 // Save survey: list of seed tracks and selected moods/genres
 app.post('/api/survey', requireAuth, (req, res) => {
   const { seeds, moods } = req.body || {};
-  if (!Array.isArray(seeds) || seeds.length === 0) {
-    return res.status(400).json({ error: 'seeds must be a non-empty array' });
+  const userId = req.authUserId;
+  const normalizedSeeds = Array.isArray(seeds)
+    ? seeds
+        .filter((seed) => seed && seed.id)
+        .map((seed) => ({
+          id: String(seed.id),
+          title: String(seed.title || ''),
+          artist: String(seed.artist || ''),
+        }))
+    : [];
+  const normalizedMoods = Array.isArray(moods)
+    ? moods.map((mood) => String(mood || '').trim()).filter(Boolean)
+    : [];
+
+  if (!normalizedSeeds.length && !normalizedMoods.length) {
+    // Empty submit means "use my listening history".
+    latestSurveyByUser.delete(userId);
+    return res.json({ ok: true });
   }
-  latestSurvey = {
-    seeds,
-    moods: Array.isArray(moods) ? moods : [],
+
+  latestSurveyByUser.set(userId, {
+    seeds: normalizedSeeds,
+    moods: normalizedMoods,
     savedAt: Date.now(),
-  };
+  });
   res.json({ ok: true });
 });
 
@@ -532,33 +549,42 @@ app.get('/api/account/profile', requireAuth, (req, res) => {
   return res.json({ user: toViewerAccount(profile) });
 });
 
-// Simple recommendation feed based on latest survey
-app.get('/api/feed', async (req, res) => {
+// Simple recommendation feed based on survey or prior likes
+app.get('/api/feed', requireAuth, async (req, res) => {
   try {
-    if (!latestSurvey || !latestSurvey.seeds?.length) {
-      // fallback: trending-like generic search
+    const userId = req.authUserId;
+    const survey = latestSurveyByUser.get(userId);
+    const likedTracks = socialLikes.get(userId) || [];
+    const baseQueries = [];
+
+    if (survey) {
+      const { seeds, moods } = survey;
+      // Build some queries based on seed artists, titles, and optional moods.
+      seeds.forEach((s) => {
+        if (s.artist) baseQueries.push(s.artist);
+        if (s.title) baseQueries.push(`${s.title} remix`);
+      });
+      moods.forEach((m) => baseQueries.push(m));
+    } else {
+      // If the user skipped survey choices, use previous likes as fallback.
+      likedTracks.slice(0, 10).forEach((track) => {
+        if (track.artist) baseQueries.push(track.artist);
+        if (track.title) baseQueries.push(`${track.title} similar`);
+        if (track.genre) baseQueries.push(track.genre);
+      });
+    }
+
+    if (baseQueries.length === 0) {
+      // Final fallback for brand new users with no survey and no likes.
       const fallback = await searchTracks('top hits', 20);
       return res.json({ items: fallback });
     }
 
-    const { seeds, moods } = latestSurvey;
-    const baseQueries = [];
-
-    // Build some queries based on seed artists, titles, and optional moods
-    seeds.forEach((s) => {
-      if (s.artist) baseQueries.push(s.artist);
-      if (s.title) baseQueries.push(`${s.title} remix`);
-    });
-    moods.forEach((m) => baseQueries.push(m));
-
-    if (baseQueries.length === 0) {
-      baseQueries.push('chill mix');
-    }
-
+    const uniqueQueries = [...new Set(baseQueries.map((query) => query.trim()).filter(Boolean))];
     const uniqueTracks = new Map();
 
-    // For each query, grab a few tracks and dedupe by id
-    for (const q of baseQueries.slice(0, 6)) {
+    // For each query, grab a few tracks and dedupe by id.
+    for (const q of uniqueQueries.slice(0, 6)) {
       const tracks = await searchTracks(q, 10);
       tracks.forEach((t) => {
         if (!uniqueTracks.has(t.id)) {
@@ -567,7 +593,13 @@ app.get('/api/feed', async (req, res) => {
       });
     }
 
-    // Shuffle for a TikTok-style feed feel
+    // If recs came up empty, fall back to a generic query.
+    if (!uniqueTracks.size) {
+      const fallback = await searchTracks('top hits', 20);
+      return res.json({ items: fallback });
+    }
+
+    // Shuffle for a TikTok-style feed feel.
     const items = Array.from(uniqueTracks.values());
     for (let i = items.length - 1; i > 0; i -= 1) {
       const j = Math.floor(Math.random() * (i + 1));
