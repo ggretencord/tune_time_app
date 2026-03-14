@@ -157,44 +157,51 @@ function TuneTimeLogo({ size = 30 }: { size?: number }) {
     >
       <defs>
         <linearGradient id={bgId} x1="6" y1="6" x2="58" y2="58" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#ff9fd8" />
-          <stop offset="0.42" stopColor="#ffd8f1" />
-          <stop offset="0.72" stopColor="#b8f6ff" />
-          <stop offset="1" stopColor="#7fdfff" />
+          <stop offset="0" stopColor="#84dfff" />
+          <stop offset="0.33" stopColor="#baf4ff" />
+          <stop offset="0.68" stopColor="#ffd3ef" />
+          <stop offset="1" stopColor="#ff88ca" />
         </linearGradient>
         <linearGradient id={uId} x1="12" y1="8" x2="52" y2="56" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#ff1493" />
-          <stop offset="0.33" stopColor="#ff9bda" />
-          <stop offset="0.68" stopColor="#9cf8ef" />
+          <stop offset="0" stopColor="#ff0f9f" />
+          <stop offset="0.42" stopColor="#ff0f9f" />
+          <stop offset="0.58" stopColor="#173a9f" />
           <stop offset="1" stopColor="#173a9f" />
         </linearGradient>
       </defs>
       <rect x="4" y="4" width="56" height="56" rx="18" fill={`url(#${bgId})`} />
-      <rect x="4" y="4" width="56" height="56" rx="18" fill="none" stroke="#ffffff" strokeOpacity="0.45" />
+      <rect x="4" y="4" width="56" height="56" rx="18" fill="none" stroke="#173a9f" strokeWidth="1.8" />
+      <rect x="5.2" y="5.2" width="53.6" height="53.6" rx="16.8" fill="none" stroke="#ffffff" strokeOpacity="0.35" />
       <path
-        d="M16 10v26c0 9 7 16 16 16s16-7 16-16V10"
+        d="M16 12v24c0 9 7 17 16 17s16-8 16-17V12"
         fill="none"
         stroke={`url(#${uId})`}
         strokeWidth="6.8"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <path
-        d="M17.5 21.5L24.5 21.5L19.3 30.7H24.5V41.5"
-        fill="none"
-        stroke="#ff1ea8"
-        strokeWidth="3.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M26 24L33.8 24L28.3 33.2H33.8V44"
-        fill="none"
-        stroke="#173a9f"
-        strokeWidth="3.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <text
+        x="32"
+        y="28.8"
+        textAnchor="middle"
+        fill="#173a9f"
+        fontSize="22"
+        fontWeight="700"
+        fontFamily="'Bodoni MT', 'Didot', 'Times New Roman', serif"
+      >
+        4
+      </text>
+      <text
+        x="32"
+        y="44.8"
+        textAnchor="middle"
+        fill="#ff1ea8"
+        fontSize="22"
+        fontWeight="700"
+        fontFamily="'Bodoni MT', 'Didot', 'Times New Roman', serif"
+      >
+        4
+      </text>
     </svg>
   )
 }
@@ -203,7 +210,10 @@ function BrandLockup() {
   return (
     <span className="brand-lockup">
       <TuneTimeLogo />
-      <span className="brand">Tune Time</span>
+      <span className="brand">
+        <span className="brand-four brand-four-blue">4</span>/
+        <span className="brand-four brand-four-pink">4</span> you
+      </span>
     </span>
   )
 }
