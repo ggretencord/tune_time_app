@@ -30,6 +30,7 @@ type SocialUser = {
   bio: string
   age: number | null
   matchOpen: boolean
+  profileImageUrl: string
   isMatched: boolean
   likedMusic: Track[]
   isFollowing: boolean
@@ -50,6 +51,7 @@ type ViewerAccount = {
   bio: string
   age: number
   matchOpen: boolean
+  profileImageUrl: string
 }
 
 type CompatibilityBreakdown = {
@@ -63,6 +65,20 @@ type CompatibilityBreakdown = {
 
 type DatingAgeFilter = 'all' | '18-24' | '25-30' | '31-38' | '39+'
 
+type PhotoPost = {
+  id: string
+  authorId: string
+  imageUrl: string
+  caption: string
+  createdAt: number
+  author: {
+    id: string
+    name: string
+    handle: string
+    profileImageUrl: string
+  } | null
+}
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const SESSION_STORAGE_KEY = 'tune_time_session_token'
 const DATING_MOOD_OPTIONS = ['chill', 'hype', 'sad', 'focus', 'party', 'romantic'] as const
@@ -75,6 +91,21 @@ function authHeaders(token: string) {
   return {
     Authorization: `Bearer ${token}`,
   }
+}
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result)
+        return
+      }
+      reject(new Error('Could not read image file'))
+    }
+    reader.onerror = () => reject(new Error('Could not read image file'))
+    reader.readAsDataURL(file)
+  })
 }
 
 function uniqueLowercase(values: string[]) {
@@ -247,6 +278,7 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
   const [birthday, setBirthday] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [profilePhotoData, setProfilePhotoData] = useState<string | null>(null)
   const [matchOpen, setMatchOpen] = useState(true)
   const [signinHandle, setSigninHandle] = useState('')
   const [signinPassword, setSigninPassword] = useState('')
@@ -254,11 +286,35 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
   const [signingIn, setSigningIn] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  async function handleProfilePhotoFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setError('Profile photo must be an image file.')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Profile photo must be 5MB or smaller.')
+      return
+    }
+    try {
+      const dataUrl = await fileToDataUrl(file)
+      setProfilePhotoData(dataUrl)
+      setError(null)
+    } catch {
+      setError('Could not read that photo. Try a different image.')
+    }
+  }
+
   async function handleCreateAccount(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
     if (!name.trim() || !handle.trim() || !birthday || !password) {
       setError('Name, handle, birthday, and password are required.')
+      return
+    }
+    if (!profilePhotoData) {
+      setError('A profile photo is required.')
       return
     }
     if (password.length < 8) {
@@ -281,6 +337,7 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
           birthday,
           matchOpen,
           password,
+          profileImageData: profilePhotoData,
         }),
       })
       const data = (await res.json()) as {
@@ -365,7 +422,7 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
           <>
             <h1 className="title">Create your account</h1>
             <p className="subtitle">
-              Birthday is required. Only followers can see your age, never your birthday.
+              Birthday and profile photo are required. You can change your photo any time.
             </p>
             <form className="account-form" onSubmit={handleCreateAccount}>
               <label className="field-label">
@@ -421,6 +478,18 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
                   type="password"
                 />
               </label>
+              <label className="field-label">
+                Profile photo
+                <input
+                  className="search-input field-input"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={handleProfilePhotoFileChange}
+                />
+              </label>
+              {profilePhotoData && (
+                <img src={profilePhotoData} alt="Profile preview" className="profile-preview" />
+              )}
               <label className="toggle-row">
                 <span>Match mode</span>
                 <button
@@ -654,7 +723,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const [items, setItems] = useState<Track[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<'discover' | 'liked' | 'dating' | 'community'>('discover')
+  const [tab, setTab] = useState<'discover' | 'liked' | 'dating' | 'photos' | 'community'>('discover')
   const [activeIndex, setActiveIndex] = useState(0)
   const [likedSongs, setLikedSongs] = useState<Track[]>([])
   const [dislikedCount, setDislikedCount] = useState(0)
@@ -667,6 +736,15 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const [datingMatchedUserIds, setDatingMatchedUserIds] = useState<string[]>([])
   const [datingAgeFilter, setDatingAgeFilter] = useState<DatingAgeFilter>('all')
   const [datingMoodFilters, setDatingMoodFilters] = useState<string[]>([])
+  const [photoPosts, setPhotoPosts] = useState<PhotoPost[]>([])
+  const [photoThreadError, setPhotoThreadError] = useState<string | null>(null)
+  const [photoDraftData, setPhotoDraftData] = useState<string | null>(null)
+  const [photoDraftCaption, setPhotoDraftCaption] = useState('')
+  const [postingPhoto, setPostingPhoto] = useState(false)
+  const [photoActiveIndex, setPhotoActiveIndex] = useState(0)
+  const [photoDragStartX, setPhotoDragStartX] = useState<number | null>(null)
+  const [photoDragX, setPhotoDragX] = useState(0)
+  const [updatingProfilePhoto, setUpdatingProfilePhoto] = useState(false)
   const [socialUsers, setSocialUsers] = useState<SocialUser[]>([])
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
   const [chatInput, setChatInput] = useState('')
@@ -677,11 +755,14 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(30)
   const [lyricsByTrack, setLyricsByTrack] = useState<Record<string, TimedLyricLine[]>>({})
+  const profilePhotoInputRef = useRef<HTMLInputElement | null>(null)
+  const photoThreadInputRef = useRef<HTMLInputElement | null>(null)
 
   const currentTrack = items.length ? items[activeIndex % items.length] : null
   const selectedUser = socialUsers.find((u) => u.id === selectedUserId) || null
   const swipeLabel = dragX > 80 ? 'LIKE' : dragX < -80 ? 'PASS' : null
   const datingSwipeLabel = datingDragX > 80 ? 'LIKE' : datingDragX < -80 ? 'PASS' : null
+  const photoSwipeLabel = photoDragX > 80 ? 'NEXT' : photoDragX < -80 ? 'BACK' : null
   const datingCandidates = useMemo(() => {
     return socialUsers
       .filter((user) => user.id !== viewer.id)
@@ -705,11 +786,108 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
     [datingAgeFilter, datingCandidates, datingLikedUserIds, datingMoodFilters, datingPassedUserIds],
   )
   const activeDatingCandidate = remainingDatingCandidates[0] || null
+  const activePhotoPost = photoPosts.length ? photoPosts[photoActiveIndex % photoPosts.length] : null
 
   function toggleDatingMoodFilter(mood: string) {
     setDatingMoodFilters((prev) =>
       prev.includes(mood) ? prev.filter((candidateMood) => candidateMood !== mood) : [...prev, mood],
     )
+  }
+
+  async function handleProfilePhotoUpdate(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setSocialError('Profile photo must be an image.')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setSocialError('Profile photo must be 5MB or smaller.')
+      return
+    }
+    try {
+      setUpdatingProfilePhoto(true)
+      const profileImageData = await fileToDataUrl(file)
+      const res = await fetch(`${API_BASE}/api/account/profile-photo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(sessionToken) },
+        body: JSON.stringify({ profileImageData }),
+      })
+      const data = (await res.json()) as { error?: string; user?: ViewerAccount }
+      if (!res.ok || !data.user) {
+        throw new Error(data.error || 'Could not update profile photo')
+      }
+      onViewerUpdate(data.user)
+      setSocialError(null)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not update profile photo'
+      setSocialError(message)
+    } finally {
+      setUpdatingProfilePhoto(false)
+      if (profilePhotoInputRef.current) profilePhotoInputRef.current.value = ''
+    }
+  }
+
+  async function handlePhotoDraftFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setPhotoThreadError('Photo post must be an image.')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setPhotoThreadError('Photo post must be 5MB or smaller.')
+      return
+    }
+    try {
+      const imageData = await fileToDataUrl(file)
+      setPhotoDraftData(imageData)
+      setPhotoThreadError(null)
+    } catch {
+      setPhotoThreadError('Could not read that photo. Try a different file.')
+    }
+  }
+
+  async function handleCreatePhotoPost() {
+    if (!photoDraftData) {
+      setPhotoThreadError('Choose a photo to post.')
+      return
+    }
+    try {
+      setPostingPhoto(true)
+      setPhotoThreadError(null)
+      const res = await fetch(`${API_BASE}/api/social/photo-posts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(sessionToken) },
+        body: JSON.stringify({
+          imageData: photoDraftData,
+          caption: photoDraftCaption,
+        }),
+      })
+      const data = (await res.json()) as { error?: string; post?: PhotoPost }
+      if (!res.ok || !data.post) {
+        throw new Error(data.error || 'Could not create photo post')
+      }
+      setPhotoPosts((prev) => [data.post as PhotoPost, ...prev])
+      setPhotoActiveIndex(0)
+      setPhotoDraftData(null)
+      setPhotoDraftCaption('')
+      if (photoThreadInputRef.current) photoThreadInputRef.current.value = ''
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not create photo post'
+      setPhotoThreadError(message)
+    } finally {
+      setPostingPhoto(false)
+    }
+  }
+
+  function stepPhotoThread(direction: 'next' | 'back') {
+    if (!photoPosts.length) return
+    setPhotoDragX(0)
+    setPhotoActiveIndex((prev) => {
+      if (direction === 'next') return (prev + 1) % photoPosts.length
+      return (prev - 1 + photoPosts.length) % photoPosts.length
+    })
   }
 
   useEffect(() => {
@@ -745,8 +923,24 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
       }
     }
 
+    async function loadPhotoPosts() {
+      setPhotoThreadError(null)
+      try {
+        const res = await fetch(`${API_BASE}/api/social/photo-posts`, {
+          headers: authHeaders(sessionToken),
+        })
+        if (!res.ok) throw new Error('Photo feed load failed')
+        const data = (await res.json()) as { posts: PhotoPost[] }
+        setPhotoPosts(data.posts)
+        setPhotoActiveIndex(0)
+      } catch {
+        setPhotoThreadError('Could not load photo thread right now.')
+      }
+    }
+
     loadFeed()
     loadSocialUsers()
+    loadPhotoPosts()
   }, [sessionToken])
 
   useEffect(() => {
@@ -1034,6 +1228,13 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
           Dating
         </button>
         <button
+          className={`tab-btn ${tab === 'photos' ? 'tab-btn-active' : ''}`}
+          type="button"
+          onClick={() => setTab('photos')}
+        >
+          Photo Thread
+        </button>
+        <button
           className={`tab-btn ${tab === 'community' ? 'tab-btn-active' : ''}`}
           type="button"
           onClick={() => setTab('community')}
@@ -1197,6 +1398,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
                   setDatingDragX(0)
                 }}
               >
+                <img src={activeDatingCandidate.candidate.profileImageUrl} alt="" className="card-artwork" />
                 <div className="card-overlay-gradient" />
                 {datingSwipeLabel && (
                   <div
@@ -1269,23 +1471,129 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
         </main>
       )}
 
+      {tab === 'photos' && (
+        <main className="panel-main">
+          <section className="selected-user-card photo-compose-card">
+            <div className="result-meta">
+              <h3>Post for people who liked you</h3>
+              <p className="song-artist">
+                Only people who liked your profile can see these photos.
+              </p>
+            </div>
+          </section>
+          {photoThreadError && <p className="error-text">{photoThreadError}</p>}
+          <section className="photo-compose-form">
+            <input
+              ref={photoThreadInputRef}
+              className="search-input"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={handlePhotoDraftFileChange}
+            />
+            <input
+              className="search-input"
+              value={photoDraftCaption}
+              onChange={(e) => setPhotoDraftCaption(e.target.value)}
+              placeholder="Add a short caption (optional)"
+              maxLength={180}
+            />
+            {photoDraftData && <img src={photoDraftData} alt="Post preview" className="photo-post-preview" />}
+            <button className="primary-btn" type="button" onClick={handleCreatePhotoPost} disabled={postingPhoto}>
+              {postingPhoto ? 'Posting...' : 'Post Photo'}
+            </button>
+          </section>
+
+          <section className="deck">
+            {!activePhotoPost ? (
+              <article className="swipe-card dating-card-empty">
+                <div className="cover-meta dating-meta">
+                  <h2 className="card-title">No photos yet</h2>
+                  <p className="card-artist">
+                    Like more profiles and they can share private photos here.
+                  </p>
+                </div>
+              </article>
+            ) : (
+              <article
+                className="swipe-card"
+                style={{ transform: `translateX(${photoDragX}px) rotate(${photoDragX / 22}deg)` }}
+                onPointerDown={(event) => setPhotoDragStartX(event.clientX)}
+                onPointerMove={(event) => {
+                  if (photoDragStartX === null) return
+                  setPhotoDragX(event.clientX - photoDragStartX)
+                }}
+                onPointerUp={() => {
+                  if (photoDragX > 90) {
+                    stepPhotoThread('next')
+                  } else if (photoDragX < -90) {
+                    stepPhotoThread('back')
+                  } else {
+                    setPhotoDragX(0)
+                  }
+                  setPhotoDragStartX(null)
+                }}
+                onPointerCancel={() => {
+                  setPhotoDragStartX(null)
+                  setPhotoDragX(0)
+                }}
+              >
+                <img src={activePhotoPost.imageUrl} alt="" className="card-artwork" />
+                <div className="card-overlay-gradient" />
+                {photoSwipeLabel && (
+                  <div className={`swipe-chip ${photoSwipeLabel === 'NEXT' ? 'swipe-like' : 'swipe-pass'}`}>
+                    {photoSwipeLabel}
+                  </div>
+                )}
+                <div className="cover-meta">
+                  <p className="song-artist">
+                    {activePhotoPost.author ? `${activePhotoPost.author.name} · @${activePhotoPost.author.handle}` : 'Unknown'}
+                  </p>
+                  <p className="card-artist">{activePhotoPost.caption || 'No caption'}</p>
+                </div>
+              </article>
+            )}
+            <div className="swipe-controls">
+              <button className="pass-btn" type="button" onClick={() => stepPhotoThread('back')}>
+                Previous
+              </button>
+              <button className="like-btn" type="button" onClick={() => stepPhotoThread('next')}>
+                Next
+              </button>
+            </div>
+          </section>
+        </main>
+      )}
+
       {tab === 'community' && (
         <main className="community-main">
           {socialError && <p className="error-text">{socialError}</p>}
           <section className="selected-user-card">
+            <img src={viewer.profileImageUrl} alt="" className="avatar-thumb" />
             <div>
               <h3>@{viewer.handle}</h3>
               <p className="song-artist">
                 Match mode: {viewer.matchOpen ? 'Open (you can match)' : 'Closed (just listening)'}
               </p>
             </div>
-            <button
-              className={viewer.matchOpen ? 'like-btn' : 'pass-btn'}
-              type="button"
-              onClick={handleMatchModeToggle}
-            >
-              {viewer.matchOpen ? 'Set Closed' : 'Set Open'}
-            </button>
+            <div className="stack-actions">
+              <button className="mini-btn" type="button" onClick={() => profilePhotoInputRef.current?.click()} disabled={updatingProfilePhoto}>
+                {updatingProfilePhoto ? 'Updating...' : 'Change photo'}
+              </button>
+              <button
+                className={viewer.matchOpen ? 'like-btn' : 'pass-btn'}
+                type="button"
+                onClick={handleMatchModeToggle}
+              >
+                {viewer.matchOpen ? 'Set Closed' : 'Set Open'}
+              </button>
+            </div>
+            <input
+              ref={profilePhotoInputRef}
+              className="hidden-file-input"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={handleProfilePhotoUpdate}
+            />
           </section>
           <section className="community-users">
             <h2 className="panel-title">People</h2>
@@ -1297,6 +1605,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
                   type="button"
                   onClick={() => setSelectedUserId(user.id)}
                 >
+                  <img src={user.profileImageUrl} alt="" className="avatar-thumb" />
                   <div className="result-meta">
                     <span className="song-title">
                       {user.name} <span className="user-handle">@{user.handle}</span>
@@ -1312,6 +1621,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
           {selectedUser && (
             <>
               <section className="selected-user-card">
+                <img src={selectedUser.profileImageUrl} alt="" className="avatar-thumb" />
                 <div>
                   <h3>{selectedUser.name}</h3>
                   <p className="song-artist">@{selectedUser.handle}</p>

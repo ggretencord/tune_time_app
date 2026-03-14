@@ -103,6 +103,14 @@
   box-sizing: border-box;
 }
 
+.profile-preview {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border-subtle);
+}
+
 .toggle-row {
   display: flex;
   align-items: center;
@@ -519,6 +527,26 @@
   font-size: 15px;
 }
 
+.avatar-thumb {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.stack-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.hidden-file-input {
+  display: none;
+}
+
 .community-likes {
   margin-bottom: 12px;
 }
@@ -563,6 +591,27 @@
   grid-template-columns: 1fr auto;
   gap: 8px;
   margin-top: 10px;
+}
+
+.photo-compose-card {
+  margin-bottom: 10px;
+}
+
+.photo-compose-form {
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: rgba(8, 8, 16, 0.9);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.photo-post-preview {
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  border-radius: 12px;
 }
 
 .card {

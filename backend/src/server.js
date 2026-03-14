@@ -1,10 +1,13 @@
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
+const sharp = require('sharp');
 
 const app = express();
 const PORT = process.env.PORT || 4010;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 app.use(cors());
 app.use(express.json());
@@ -12,6 +15,7 @@ app.use(express.json());
 // In-memory store for survey preferences (per session would be better; this is demo-only)
 let latestSurvey = null;
 let socialMessages = [];
+let socialPhotoPosts = [];
 
 const socialProfiles = new Map([
   [
@@ -23,6 +27,8 @@ const socialProfiles = new Map([
       bio: 'Building the perfect soundtrack.',
       birthday: '1999-06-15',
       matchOpen: true,
+      profileImageUrl:
+        'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=800&q=80',
     },
   ],
   [
@@ -34,6 +40,8 @@ const socialProfiles = new Map([
       bio: 'Indie nights and dreamy vocals.',
       birthday: '1998-02-03',
       matchOpen: true,
+      profileImageUrl:
+        'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=800&q=80',
     },
   ],
   [
@@ -45,6 +53,8 @@ const socialProfiles = new Map([
       bio: 'Hip-hop edits and gym energy.',
       birthday: '1996-10-28',
       matchOpen: false,
+      profileImageUrl:
+        'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=800&q=80',
     },
   ],
   [
@@ -56,6 +66,8 @@ const socialProfiles = new Map([
       bio: 'House, disco, and late-night drives.',
       birthday: '2001-01-11',
       matchOpen: true,
+      profileImageUrl:
+        'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80',
     },
   ],
 ]);
@@ -133,6 +145,7 @@ function ensureSocialUser(userId) {
       bio: 'Music fan',
       birthday: '2000-01-01',
       matchOpen: true,
+      profileImageUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(userId)}&background=111827&color=f9f7ff`,
       passwordHash: hashPassword('password123'),
     });
   }
@@ -142,6 +155,141 @@ function ensureSocialUser(userId) {
   if (!socialFollows.has(userId)) {
     socialFollows.set(userId, new Set());
   }
+}
+
+function detectImageMimeType(buffer) {
+  if (!buffer || buffer.length < 12) return null;
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+  if (
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    return 'image/png';
+  }
+  if (
+    buffer[0] === 0x52 &&
+    buffer[1] === 0x49 &&
+    buffer[2] === 0x46 &&
+    buffer[3] === 0x46 &&
+    buffer[8] === 0x57 &&
+    buffer[9] === 0x45 &&
+    buffer[10] === 0x42 &&
+    buffer[11] === 0x50
+  ) {
+    return 'image/webp';
+  }
+  return null;
+}
+
+function isSkinPixel(r, g, b) {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  if (r < 80 || g < 35 || b < 20) return false;
+  if (max - min < 12) return false;
+  if (!(r > g && r > b)) return false;
+  const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+  const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+  return cb >= 77 && cb <= 127 && cr >= 133 && cr <= 173;
+}
+
+async function isLikelyNudeImage(buffer) {
+  const prepared = await sharp(buffer)
+    .rotate()
+    .resize(320, 320, { fit: 'inside', withoutEnlargement: true })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const { data, info } = prepared;
+  const width = info.width;
+  const height = info.height;
+  if (!width || !height || width < 64 || height < 64) return true;
+
+  let skinPixels = 0;
+  let centerSkinPixels = 0;
+  const totalPixels = width * height;
+  const centerLeft = Math.floor(width * 0.2);
+  const centerRight = Math.ceil(width * 0.8);
+  const centerTop = Math.floor(height * 0.2);
+  const centerBottom = Math.ceil(height * 0.8);
+  const centerPixels = Math.max(1, (centerRight - centerLeft) * (centerBottom - centerTop));
+
+  for (let i = 0; i < data.length; i += info.channels) {
+    const pixelIndex = i / info.channels;
+    const x = pixelIndex % width;
+    const y = Math.floor(pixelIndex / width);
+    if (isSkinPixel(data[i], data[i + 1], data[i + 2])) {
+      skinPixels += 1;
+      if (x >= centerLeft && x < centerRight && y >= centerTop && y < centerBottom) {
+        centerSkinPixels += 1;
+      }
+    }
+  }
+
+  const skinRatio = skinPixels / totalPixels;
+  const centerSkinRatio = centerSkinPixels / centerPixels;
+  return skinRatio > 0.45 || centerSkinRatio > 0.52;
+}
+
+async function validateAndModerateImageData(imageData, fieldName) {
+  const raw = String(imageData || '').trim();
+  if (!raw) return { ok: false, error: `${fieldName} is required` };
+
+  const dataUrlMatch = raw.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/i);
+  if (!dataUrlMatch) {
+    return { ok: false, error: `${fieldName} must be a base64 data URL (jpeg/png/webp only)` };
+  }
+  const mimeType = dataUrlMatch[1].toLowerCase();
+  const base64Data = dataUrlMatch[2];
+  if (!ALLOWED_IMAGE_MIME_TYPES.has(mimeType)) {
+    return { ok: false, error: 'Only jpeg, png, and webp images are allowed' };
+  }
+
+  let imageBuffer;
+  try {
+    imageBuffer = Buffer.from(base64Data, 'base64');
+  } catch {
+    return { ok: false, error: 'Image data is invalid base64' };
+  }
+  if (!imageBuffer.length || imageBuffer.length > MAX_IMAGE_BYTES) {
+    return { ok: false, error: 'Image must be between 1 byte and 5MB' };
+  }
+
+  const sniffedMimeType = detectImageMimeType(imageBuffer);
+  if (!sniffedMimeType || sniffedMimeType !== mimeType) {
+    return { ok: false, error: 'Image content does not match the declared file type' };
+  }
+
+  try {
+    const metadata = await sharp(imageBuffer).metadata();
+    if (!metadata.width || !metadata.height || metadata.width < 64 || metadata.height < 64) {
+      return { ok: false, error: 'Image must be at least 64x64 pixels' };
+    }
+    if (metadata.width > 5000 || metadata.height > 5000) {
+      return { ok: false, error: 'Image dimensions are too large' };
+    }
+  } catch {
+    return { ok: false, error: 'Could not process image' };
+  }
+
+  try {
+    if (await isLikelyNudeImage(imageBuffer)) {
+      return {
+        ok: false,
+        error: 'Image was rejected by safety checks. Nude photos are not allowed.',
+      };
+    }
+  } catch {
+    return { ok: false, error: 'Image moderation failed. Please try a different image.' };
+  }
+
+  return { ok: true, value: raw };
 }
 
 function getAgeFromBirthday(birthday) {
@@ -173,6 +321,7 @@ function toViewerAccount(profile) {
     bio: profile.bio,
     age: getAgeFromBirthday(profile.birthday),
     matchOpen: Boolean(profile.matchOpen),
+    profileImageUrl: String(profile.profileImageUrl || ''),
   };
 }
 
@@ -189,6 +338,7 @@ function toSocialUser(viewerId, profile) {
     bio: profile.bio,
     age: viewerFollowsTarget ? getAgeFromBirthday(profile.birthday) : null,
     matchOpen: Boolean(profile.matchOpen),
+    profileImageUrl: String(profile.profileImageUrl || ''),
     isMatched: isMutualMatch(
       viewerProfile,
       profile,
@@ -256,8 +406,8 @@ app.post('/api/survey', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/account/register', (req, res) => {
-  const { name, handle, bio, birthday, matchOpen, password } = req.body || {};
+app.post('/api/account/register', async (req, res) => {
+  const { name, handle, bio, birthday, matchOpen, password, profileImageData } = req.body || {};
   const cleanedName = String(name || '').trim();
   const cleanedHandle = String(handle || '')
     .trim()
@@ -281,6 +431,10 @@ app.post('/api/account/register', (req, res) => {
   if (age === null || age < 13) {
     return res.status(400).json({ error: 'You must be at least 13 years old' });
   }
+  const moderation = await validateAndModerateImageData(profileImageData, 'profileImageData');
+  if (!moderation.ok) {
+    return res.status(400).json({ error: moderation.error });
+  }
   const taken = Array.from(socialProfiles.values()).some(
     (profile) => profile.handle === cleanedHandle
   );
@@ -296,12 +450,29 @@ app.post('/api/account/register', (req, res) => {
     bio: cleanedBio || 'Music fan',
     birthday: cleanedBirthday,
     matchOpen: matchOpen !== false,
+    profileImageUrl: moderation.value,
     passwordHash: hashPassword(cleanedPassword),
   });
   ensureSocialUser(userId);
 
   const sessionToken = createSession(userId);
   return res.status(201).json({ user: toViewerAccount(socialProfiles.get(userId)), sessionToken });
+});
+
+app.post('/api/account/profile-photo', requireAuth, async (req, res) => {
+  const { profileImageData } = req.body || {};
+  const userId = req.authUserId;
+  const profile = socialProfiles.get(userId);
+  if (!profile) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  const moderation = await validateAndModerateImageData(profileImageData, 'profileImageData');
+  if (!moderation.ok) {
+    return res.status(400).json({ error: moderation.error });
+  }
+  profile.profileImageUrl = moderation.value;
+  socialProfiles.set(userId, profile);
+  return res.json({ ok: true, user: toViewerAccount(profile) });
 });
 
 app.post('/api/account/login', (req, res) => {
@@ -437,6 +608,24 @@ async function seedSocialLikes() {
       sentAt: Date.now() - 1000 * 60 * 60 * 2,
     },
   ];
+  socialPhotoPosts = [
+    {
+      id: 'photo-seed-ava',
+      authorId: 'ava',
+      imageUrl:
+        'https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?auto=format&fit=crop&w=900&q=80',
+      caption: 'Late-night record store run.',
+      createdAt: Date.now() - 1000 * 60 * 50,
+    },
+    {
+      id: 'photo-seed-jules',
+      authorId: 'jules',
+      imageUrl:
+        'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=900&q=80',
+      caption: 'Pre-set playlist locked in.',
+      createdAt: Date.now() - 1000 * 60 * 20,
+    },
+  ];
 }
 
 // Social graph and messaging endpoints
@@ -557,6 +746,79 @@ app.post('/api/social/messages', requireAuth, (req, res) => {
     socialMessages = socialMessages.slice(-200);
   }
   return res.json({ ok: true, message });
+});
+
+function canViewPhotoPosts(viewerId, authorId) {
+  if (viewerId === authorId) return true;
+  ensureSocialUser(viewerId);
+  ensureSocialUser(authorId);
+  return socialFollows.get(viewerId).has(authorId);
+}
+
+app.get('/api/social/photo-posts', requireAuth, (req, res) => {
+  const viewerId = req.authUserId;
+  const requestedAuthorId = String(req.query.authorId || '').trim();
+  const posts = socialPhotoPosts
+    .filter((post) => {
+      if (requestedAuthorId && post.authorId !== requestedAuthorId) return false;
+      return canViewPhotoPosts(viewerId, post.authorId);
+    })
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map((post) => {
+      const author = socialProfiles.get(post.authorId);
+      return {
+        ...post,
+        author: author
+          ? {
+              id: author.id,
+              name: author.name,
+              handle: author.handle,
+              profileImageUrl: String(author.profileImageUrl || ''),
+            }
+          : null,
+      };
+    });
+  return res.json({ posts });
+});
+
+app.post('/api/social/photo-posts', requireAuth, async (req, res) => {
+  const { imageData, caption } = req.body || {};
+  const authorId = req.authUserId;
+  const cleanedCaption = String(caption || '').trim().slice(0, 180);
+  const author = socialProfiles.get(authorId);
+  if (!author) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  if (!author.profileImageUrl) {
+    return res.status(403).json({ error: 'You must set a profile photo before posting' });
+  }
+  const moderation = await validateAndModerateImageData(imageData, 'imageData');
+  if (!moderation.ok) {
+    return res.status(400).json({ error: moderation.error });
+  }
+  const post = {
+    id: `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    authorId,
+    imageUrl: moderation.value,
+    caption: cleanedCaption,
+    createdAt: Date.now(),
+  };
+  socialPhotoPosts.unshift(post);
+  if (socialPhotoPosts.length > 400) {
+    socialPhotoPosts = socialPhotoPosts.slice(0, 400);
+  }
+  return res.status(201).json({
+    ok: true,
+    post: {
+      ...post,
+      author: {
+        id: author.id,
+        name: author.name,
+        handle: author.handle,
+        profileImageUrl: String(author.profileImageUrl || ''),
+      },
+    },
+  });
 });
 
 // Fetch plain lyrics and return cleaned text lines
