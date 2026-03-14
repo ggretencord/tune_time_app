@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import './App.css'
 
 type Track = {
@@ -139,6 +139,73 @@ async function readApiErrorMessage(res: Response, fallback: string) {
 
 function uniqueLowercase(values: string[]) {
   return new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean))
+}
+
+function TuneTimeLogo({ size = 30 }: { size?: number }) {
+  const gradId = useId()
+  const bgId = `${gradId}-bg`
+  const uId = `${gradId}-u`
+
+  return (
+    <svg
+      className="brand-logo"
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <defs>
+        <linearGradient id={bgId} x1="6" y1="6" x2="58" y2="58" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#ff9fd8" />
+          <stop offset="0.42" stopColor="#ffd8f1" />
+          <stop offset="0.72" stopColor="#b8f6ff" />
+          <stop offset="1" stopColor="#7fdfff" />
+        </linearGradient>
+        <linearGradient id={uId} x1="12" y1="8" x2="52" y2="56" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#ff1493" />
+          <stop offset="0.33" stopColor="#ff9bda" />
+          <stop offset="0.68" stopColor="#9cf8ef" />
+          <stop offset="1" stopColor="#173a9f" />
+        </linearGradient>
+      </defs>
+      <rect x="4" y="4" width="56" height="56" rx="18" fill={`url(#${bgId})`} />
+      <rect x="4" y="4" width="56" height="56" rx="18" fill="none" stroke="#ffffff" strokeOpacity="0.45" />
+      <path
+        d="M16 10v26c0 9 7 16 16 16s16-7 16-16V10"
+        fill="none"
+        stroke={`url(#${uId})`}
+        strokeWidth="6.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M17.5 21.5L24.5 21.5L19.3 30.7H24.5V41.5"
+        fill="none"
+        stroke="#ff1ea8"
+        strokeWidth="3.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M26 24L33.8 24L28.3 33.2H33.8V44"
+        fill="none"
+        stroke="#173a9f"
+        strokeWidth="3.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function BrandLockup() {
+  return (
+    <span className="brand-lockup">
+      <TuneTimeLogo />
+      <span className="brand">Tune Time</span>
+    </span>
+  )
 }
 
 function inferMoodsFromTracks(tracks: Track[]) {
@@ -420,7 +487,7 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
   return (
     <div className="screen survey-screen">
       <header className="top-bar">
-        <span className="brand">Tune Time</span>
+        <BrandLockup />
         <span className="pill">{mode === 'create' ? 'Create account' : 'Sign in'}</span>
       </header>
       <main className="content">
@@ -642,7 +709,7 @@ function SurveyScreen({ sessionToken, onDone }: SurveyProps) {
   return (
     <div className="screen survey-screen">
       <header className="top-bar">
-        <span className="brand">Tune Time</span>
+        <BrandLockup />
         <span className="pill">Step 1 · Your vibe</span>
       </header>
 
@@ -1338,7 +1405,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
     <div className="screen feed-screen">
       <header className="top-bar feed-top-bar">
         <div className="feed-top-left">
-          <span className="brand">Tune Time</span>
+          <BrandLockup />
           <div className="global-clip-search">
             <input
               className="search-input global-search-input"
