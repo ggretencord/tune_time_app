@@ -515,9 +515,13 @@
 }
 
 .swipe-controls {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
   gap: 10px;
+}
+
+.swipe-controls > button {
+  flex: 1;
+  min-width: 0;
 }
 
 .dating-swipe-card {

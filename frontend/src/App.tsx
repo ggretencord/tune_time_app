@@ -833,7 +833,9 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const [activeIndex, setActiveIndex] = useState(0)
   const [likedSongs, setLikedSongs] = useState<Track[]>([])
   const [dislikedCount, setDislikedCount] = useState(0)
+  const [scrollHistory, setScrollHistory] = useState<string[]>([])
   const [dragStartX, setDragStartX] = useState<number | null>(null)
+  const [dragStartY, setDragStartY] = useState<number | null>(null)
   const [dragX, setDragX] = useState(0)
   const [datingDragStartX, setDatingDragStartX] = useState<number | null>(null)
   const [datingDragX, setDatingDragX] = useState(0)
@@ -1218,7 +1220,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
     setGlobalClipError(null)
   }
 
-  async function swipe(action: 'like' | 'dislike') {
+  async function swipe(action: 'like' | 'dislike' | 'skip') {
     if (!currentTrack || !items.length) return
     if (action === 'like') {
       setLikedSongs((prev) => {
@@ -1230,11 +1232,29 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
         headers: { 'Content-Type': 'application/json', ...authHeaders(sessionToken) },
         body: JSON.stringify({ track: currentTrack }),
       }).catch(() => {})
-    } else {
+    } else if (action === 'dislike') {
       setDislikedCount((prev) => prev + 1)
+    } else {
+      setScrollHistory((prev) => [...prev, currentTrack.id])
     }
     setDragX(0)
     setActiveIndex((prev) => (prev + 1) % items.length)
+  }
+
+  function handleScrollBack() {
+    if (!scrollHistory.length) return
+    setScrollHistory((prev) => {
+      for (let idx = prev.length - 1; idx >= 0; idx -= 1) {
+        const trackId = prev[idx]
+        const foundIndex = items.findIndex((track) => track.id === trackId)
+        if (foundIndex >= 0) {
+          setDragX(0)
+          setActiveIndex(foundIndex)
+          return prev.slice(0, idx)
+        }
+      }
+      return []
+    })
   }
 
   async function handleFollowToggle(user: SocialUser) {
@@ -1518,13 +1538,24 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
               style={{
                 transform: `translateX(${dragX}px) rotate(${dragX / 18}deg)`,
               }}
-              onPointerDown={(event) => setDragStartX(event.clientX)}
-              onPointerMove={(event) => {
-                if (dragStartX === null) return
-                setDragX(event.clientX - dragStartX)
+              onPointerDown={(event) => {
+                setDragStartX(event.clientX)
+                setDragStartY(event.clientY)
               }}
-              onPointerUp={() => {
-                if (dragX > 90) {
+              onPointerMove={(event) => {
+                if (dragStartX === null || dragStartY === null) return
+                const deltaX = event.clientX - dragStartX
+                const deltaY = event.clientY - dragStartY
+                // Prioritize horizontal movement for card tilt/label feedback.
+                setDragX(Math.abs(deltaX) >= Math.abs(deltaY) ? deltaX : 0)
+              }}
+              onPointerUp={(event) => {
+                const deltaY = dragStartY === null ? 0 : dragStartY - event.clientY
+                if (deltaY > 90) {
+                  swipe('skip')
+                } else if (deltaY < -90) {
+                  handleScrollBack()
+                } else if (dragX > 90) {
                   swipe('like')
                 } else if (dragX < -90) {
                   swipe('dislike')
@@ -1532,9 +1563,11 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
                   setDragX(0)
                 }
                 setDragStartX(null)
+                setDragStartY(null)
               }}
               onPointerCancel={() => {
                 setDragStartX(null)
+                setDragStartY(null)
                 setDragX(0)
               }}
             >
@@ -1560,6 +1593,17 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
             <div className="swipe-controls">
               <button className="pass-btn" type="button" onClick={() => swipe('dislike')}>
                 Swipe Left
+              </button>
+              <button className="mini-btn" type="button" onClick={() => swipe('skip')}>
+                Scroll
+              </button>
+              <button
+                className="mini-btn"
+                type="button"
+                onClick={handleScrollBack}
+                disabled={!scrollHistory.length}
+              >
+                Scroll Back
               </button>
               <button className="like-btn" type="button" onClick={() => swipe('like')}>
                 Swipe Right
