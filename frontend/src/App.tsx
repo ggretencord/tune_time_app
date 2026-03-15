@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import './App.css'
 
 type Track = {
@@ -979,6 +979,8 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
   const [chatInput, setChatInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [unreadMessageAlerts, setUnreadMessageAlerts] = useState(0)
+  const [newMatchAlerts, setNewMatchAlerts] = useState(0)
   const [socialError, setSocialError] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -992,6 +994,9 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const photoThreadInputRef = useRef<HTMLInputElement | null>(null)
   const photoEditorRef = useRef<HTMLDivElement | null>(null)
   const photoClipTimeoutRef = useRef<number | null>(null)
+  const notificationsHydratedRef = useRef(false)
+  const matchedByUserRef = useRef<Record<string, boolean>>({})
+  const latestIncomingByUserRef = useRef<Record<string, number>>({})
 
   const currentTrack = items.length ? items[activeIndex % items.length] : null
   const selectedUser = socialUsers.find((u) => u.id === selectedUserId) || null
@@ -1062,6 +1067,25 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
       prev.includes(mood) ? prev.filter((candidateMood) => candidateMood !== mood) : [...prev, mood],
     )
   }
+
+  const sendBrowserNotification = useCallback((title: string, body: string) => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return
+    const create = () =>
+      new Notification(title, {
+        body,
+      })
+    if (Notification.permission === 'granted') {
+      create()
+      return
+    }
+    if (Notification.permission === 'default') {
+      Notification.requestPermission()
+        .then((permission) => {
+          if (permission === 'granted') create()
+        })
+        .catch(() => {})
+    }
+  }, [])
 
   async function handleProfilePhotoUpdate(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -1435,6 +1459,112 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
 
     loadMessages()
   }, [selectedUserId, sessionToken])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function pollSocialNotifications() {
+      try {
+        const usersRes = await fetch(`${API_BASE}/api/social/users`, {
+          headers: authHeaders(sessionToken),
+        })
+        if (!usersRes.ok) throw new Error('social poll failed')
+        const usersData = (await usersRes.json()) as { users: SocialUser[] }
+        if (cancelled) return
+        setSocialUsers(usersData.users)
+        const preferredUserId =
+          usersData.users.find((user) => user.isMatched || user.isMutualFollow)?.id ||
+          usersData.users[0]?.id ||
+          null
+        setSelectedUserId((prev) => {
+          if (!usersData.users.length) return null
+          if (prev && usersData.users.some((user) => user.id === prev)) return prev
+          return preferredUserId
+        })
+
+        const conversationUsers = usersData.users.filter((user) => user.isMutualFollow || user.isMatched)
+        const messageSnapshots = await Promise.all(
+          conversationUsers.map(async (user) => {
+            const res = await fetch(`${API_BASE}/api/social/messages?withUserId=${user.id}`, {
+              headers: authHeaders(sessionToken),
+            })
+            if (!res.ok) return { user, latestIncomingSentAt: 0, latestIncomingText: '' }
+            const data = (await res.json()) as { messages: ChatMessage[] }
+            const latestIncoming = [...data.messages]
+              .reverse()
+              .find((message) => message.fromId === user.id && message.toId === viewer.id)
+            return {
+              user,
+              latestIncomingSentAt: latestIncoming?.sentAt ?? 0,
+              latestIncomingText: latestIncoming?.text ?? '',
+            }
+          }),
+        )
+        if (cancelled) return
+
+        let newIncomingCount = 0
+        let newMatchCount = 0
+        for (const user of usersData.users) {
+          const previousMatched = matchedByUserRef.current[user.id]
+          if (typeof previousMatched === 'boolean') {
+            if (!previousMatched && user.isMatched) {
+              newMatchCount += 1
+              sendBrowserNotification('New match on Tune Time', `You matched with ${user.name}.`)
+            }
+          } else {
+            matchedByUserRef.current[user.id] = user.isMatched
+          }
+          matchedByUserRef.current[user.id] = user.isMatched
+        }
+
+        for (const snapshot of messageSnapshots) {
+          const previousLatestIncoming = latestIncomingByUserRef.current[snapshot.user.id] ?? 0
+          if (snapshot.latestIncomingSentAt > previousLatestIncoming) {
+            const viewingThreadNow =
+              document.visibilityState === 'visible' && tab === 'messages' && selectedUserId === snapshot.user.id
+            if (notificationsHydratedRef.current && !viewingThreadNow) {
+              newIncomingCount += 1
+              const body = snapshot.latestIncomingText || `${snapshot.user.name} sent you a message.`
+              sendBrowserNotification(`New message from ${snapshot.user.name}`, body)
+            }
+            latestIncomingByUserRef.current[snapshot.user.id] = snapshot.latestIncomingSentAt
+          } else if (!latestIncomingByUserRef.current[snapshot.user.id]) {
+            latestIncomingByUserRef.current[snapshot.user.id] = snapshot.latestIncomingSentAt
+          }
+        }
+
+        if (!notificationsHydratedRef.current) {
+          notificationsHydratedRef.current = true
+          return
+        }
+
+        if (newIncomingCount > 0) {
+          setUnreadMessageAlerts((prev) => prev + newIncomingCount)
+        }
+        if (newMatchCount > 0) {
+          setNewMatchAlerts((prev) => prev + newMatchCount)
+        }
+      } catch {
+        // Silence polling errors; regular UI fetches already handle user-facing errors.
+      }
+    }
+
+    pollSocialNotifications()
+    const intervalId = window.setInterval(pollSocialNotifications, 8000)
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [selectedUserId, sendBrowserNotification, sessionToken, tab, viewer.id])
+
+  useEffect(() => {
+    if (tab === 'messages') {
+      setUnreadMessageAlerts(0)
+    }
+    if (tab === 'community' || tab === 'dating') {
+      setNewMatchAlerts(0)
+    }
+  }, [tab])
 
   useEffect(() => {
     if (!audioRef.current) {
@@ -1902,14 +2032,14 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
           type="button"
           onClick={() => setTab('community')}
         >
-          Community
+          Community{newMatchAlerts > 0 ? ` (${newMatchAlerts})` : ''}
         </button>
         <button
           className={`tab-btn ${tab === 'messages' ? 'tab-btn-active' : ''}`}
           type="button"
           onClick={() => setTab('messages')}
         >
-          Messages
+          Messages{unreadMessageAlerts > 0 ? ` (${unreadMessageAlerts})` : ''}
         </button>
       </nav>
 
