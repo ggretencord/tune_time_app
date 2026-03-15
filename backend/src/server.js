@@ -26,6 +26,7 @@ const socialProfiles = new Map([
       handle: 'you',
       bio: 'Building the perfect soundtrack.',
       birthday: '1999-06-15',
+      gender: 'would rather not say',
       matchOpen: true,
       profileImageUrl:
         'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=800&q=80',
@@ -39,6 +40,7 @@ const socialProfiles = new Map([
       handle: 'ava_r',
       bio: 'Indie nights and dreamy vocals.',
       birthday: '1998-02-03',
+      gender: 'female',
       matchOpen: true,
       profileImageUrl:
         'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=800&q=80',
@@ -52,6 +54,7 @@ const socialProfiles = new Map([
       handle: 'milo_g',
       bio: 'Hip-hop edits and gym energy.',
       birthday: '1996-10-28',
+      gender: 'male',
       matchOpen: false,
       profileImageUrl:
         'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=800&q=80',
@@ -65,6 +68,7 @@ const socialProfiles = new Map([
       handle: 'jules_mix',
       bio: 'House, disco, and late-night drives.',
       birthday: '2001-01-11',
+      gender: 'would rather not say',
       matchOpen: true,
       profileImageUrl:
         'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80',
@@ -80,6 +84,7 @@ const socialFollows = new Map([
   ['jules', new Set()],
 ]);
 const sessions = new Map();
+const ALLOWED_GENDERS = new Set(['male', 'female', 'would rather not say']);
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16);
@@ -144,6 +149,7 @@ function ensureSocialUser(userId) {
       handle: userId.toLowerCase().replace(/\s+/g, ''),
       bio: 'Music fan',
       birthday: '2000-01-01',
+      gender: 'would rather not say',
       matchOpen: true,
       profileImageUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(userId)}&background=111827&color=f9f7ff`,
       passwordHash: hashPassword('password123'),
@@ -321,6 +327,9 @@ function toViewerAccount(profile) {
     handle: profile.handle,
     bio: profile.bio,
     age: getAgeFromBirthday(profile.birthday),
+    gender: ALLOWED_GENDERS.has(String(profile.gender || '').toLowerCase())
+      ? String(profile.gender).toLowerCase()
+      : 'would rather not say',
     matchOpen: Boolean(profile.matchOpen),
     profileImageUrl: String(profile.profileImageUrl || ''),
     likedMusic: socialLikes.get(profile.id) || [],
@@ -340,6 +349,9 @@ function toSocialUser(viewerId, profile) {
     handle: profile.handle,
     bio: profile.bio,
     age: viewerFollowsTarget ? getAgeFromBirthday(profile.birthday) : null,
+    gender: ALLOWED_GENDERS.has(String(profile.gender || '').toLowerCase())
+      ? String(profile.gender).toLowerCase()
+      : 'would rather not say',
     matchOpen: Boolean(profile.matchOpen),
     profileImageUrl: String(profile.profileImageUrl || ''),
     isMatched: isMutualMatch(
@@ -429,7 +441,7 @@ app.post('/api/survey', requireAuth, (req, res) => {
 });
 
 app.post('/api/account/register', async (req, res) => {
-  const { name, handle, bio, birthday, matchOpen, password, profileImageData } = req.body || {};
+  const { name, handle, bio, birthday, gender, matchOpen, password, profileImageData } = req.body || {};
   const cleanedName = String(name || '').trim();
   const cleanedHandle = String(handle || '')
     .trim()
@@ -437,10 +449,18 @@ app.post('/api/account/register', async (req, res) => {
     .replace(/[^a-z0-9_]/g, '');
   const cleanedBio = String(bio || '').trim();
   const cleanedBirthday = String(birthday || '').trim();
+  const cleanedGender = String(gender || '')
+    .trim()
+    .toLowerCase();
   const cleanedPassword = String(password || '');
 
-  if (!cleanedName || !cleanedHandle || !cleanedBirthday || !cleanedPassword) {
-    return res.status(400).json({ error: 'name, handle, birthday, and password are required' });
+  if (!cleanedName || !cleanedHandle || !cleanedBirthday || !cleanedPassword || !cleanedGender) {
+    return res
+      .status(400)
+      .json({ error: 'name, handle, birthday, gender, and password are required' });
+  }
+  if (!ALLOWED_GENDERS.has(cleanedGender)) {
+    return res.status(400).json({ error: 'gender must be male, female, or would rather not say' });
   }
   if (cleanedPassword.length < 8) {
     return res.status(400).json({ error: 'Password must be at least 8 characters' });
@@ -471,6 +491,7 @@ app.post('/api/account/register', async (req, res) => {
     handle: cleanedHandle,
     bio: cleanedBio || 'Music fan',
     birthday: cleanedBirthday,
+    gender: cleanedGender,
     matchOpen: matchOpen !== false,
     profileImageUrl: moderation.value,
     passwordHash: hashPassword(cleanedPassword),

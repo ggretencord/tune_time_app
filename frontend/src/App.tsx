@@ -29,6 +29,7 @@ type SocialUser = {
   handle: string
   bio: string
   age: number | null
+  gender: DatingGenderOption
   matchOpen: boolean
   profileImageUrl: string
   isMatched: boolean
@@ -53,6 +54,7 @@ type ViewerAccount = {
   handle: string
   bio: string
   age: number
+  gender: DatingGenderOption
   matchOpen: boolean
   profileImageUrl: string
   likedMusic: Track[]
@@ -68,6 +70,8 @@ type CompatibilityBreakdown = {
 }
 
 type DatingAgeFilter = 'all' | '18-24' | '25-30' | '31-38' | '39+'
+type DatingGenderOption = 'male' | 'female' | 'would rather not say'
+type DatingGenderFilter = 'all' | DatingGenderOption
 
 type PhotoPost = {
   id: string
@@ -86,6 +90,7 @@ type PhotoPost = {
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const SESSION_STORAGE_KEY = 'tune_time_session_token'
 const DATING_MOOD_OPTIONS = ['chill', 'hype', 'sad', 'focus', 'party', 'romantic'] as const
+const DATING_GENDER_OPTIONS: DatingGenderOption[] = ['male', 'female', 'would rather not say']
 
 function getSurveyStorageKey(userId: string) {
   return `tune_time_survey_complete_${userId}`
@@ -242,6 +247,11 @@ function matchesDatingAgeFilter(age: number | null, filter: DatingAgeFilter) {
   return age >= 39
 }
 
+function matchesDatingGenderFilter(gender: DatingGenderOption, filter: DatingGenderFilter) {
+  if (filter === 'all') return true
+  return gender === filter
+}
+
 function buildCompatibility(
   viewer: ViewerAccount,
   myLikes: Track[],
@@ -383,6 +393,7 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
   const [handle, setHandle] = useState('')
   const [bio, setBio] = useState('')
   const [birthday, setBirthday] = useState('')
+  const [gender, setGender] = useState<DatingGenderOption>('would rather not say')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [profilePhotoData, setProfilePhotoData] = useState<string | null>(null)
@@ -416,8 +427,8 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
   async function handleCreateAccount(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
-    if (!name.trim() || !handle.trim() || !birthday || !password) {
-      setError('Name, handle, birthday, and password are required.')
+    if (!name.trim() || !handle.trim() || !birthday || !gender || !password) {
+      setError('Name, handle, birthday, gender, and password are required.')
       return
     }
     if (!profilePhotoData) {
@@ -442,6 +453,7 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
           handle: handle.trim(),
           bio: bio.trim(),
           birthday,
+          gender,
           matchOpen,
           password,
           profileImageData: profilePhotoData,
@@ -529,7 +541,7 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
           <>
             <h1 className="title">Create your account</h1>
             <p className="subtitle">
-              Birthday and profile photo are required. You can change your photo any time.
+              Birthday, gender, and profile photo are required. You can change your photo any time.
             </p>
             <form className="account-form" onSubmit={handleCreateAccount}>
               <label className="field-label">
@@ -565,6 +577,22 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
                   onChange={(e) => setBirthday(e.target.value)}
                   type="date"
                 />
+              </label>
+              <label className="field-label">
+                Gender
+                <select
+                  className="search-input field-input"
+                  value={gender}
+                  onChange={(e) => setGender(e.target.value as DatingGenderOption)}
+                >
+                  {DATING_GENDER_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option === 'would rather not say'
+                        ? 'Would rather not say'
+                        : option.charAt(0).toUpperCase() + option.slice(1)}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="field-label">
                 Password
@@ -844,6 +872,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const [datingPassedUserIds, setDatingPassedUserIds] = useState<string[]>([])
   const [datingMatchedUserIds, setDatingMatchedUserIds] = useState<string[]>([])
   const [datingAgeFilter, setDatingAgeFilter] = useState<DatingAgeFilter>('all')
+  const [datingGenderFilter, setDatingGenderFilter] = useState<DatingGenderFilter>('all')
   const [datingMoodFilters, setDatingMoodFilters] = useState<string[]>([])
   const [photoPosts, setPhotoPosts] = useState<PhotoPost[]>([])
   const [photoThreadError, setPhotoThreadError] = useState<string | null>(null)
@@ -910,10 +939,18 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
           !datingLikedUserIds.includes(candidate.id) &&
           !datingPassedUserIds.includes(candidate.id) &&
           matchesDatingAgeFilter(candidate.age, datingAgeFilter) &&
+          matchesDatingGenderFilter(candidate.gender, datingGenderFilter) &&
           (datingMoodFilters.length === 0 ||
             datingMoodFilters.some((mood) => candidateMoods.has(mood))),
       ),
-    [datingAgeFilter, datingCandidates, datingLikedUserIds, datingMoodFilters, datingPassedUserIds],
+    [
+      datingAgeFilter,
+      datingCandidates,
+      datingGenderFilter,
+      datingLikedUserIds,
+      datingMoodFilters,
+      datingPassedUserIds,
+    ],
   )
   const activeDatingCandidate = remainingDatingCandidates[0] || null
   const activePhotoPost = photoPosts.length ? photoPosts[photoActiveIndex % photoPosts.length] : null
@@ -1677,6 +1714,22 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
                     onClick={() => setDatingAgeFilter(range)}
                   >
                     {range === 'all' ? 'Any age' : range}
+                  </button>
+                ))}
+              </div>
+              <div className="chips-row dating-filter-row">
+                {(['all', ...DATING_GENDER_OPTIONS] as DatingGenderFilter[]).map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={`chip ${datingGenderFilter === option ? 'chip-selected' : ''}`}
+                    onClick={() => setDatingGenderFilter(option)}
+                  >
+                    {option === 'all'
+                      ? 'Any gender'
+                      : option === 'would rather not say'
+                        ? 'Would rather not say'
+                        : option.charAt(0).toUpperCase() + option.slice(1)}
                   </button>
                 ))}
               </div>
