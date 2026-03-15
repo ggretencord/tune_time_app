@@ -11,6 +11,16 @@ type Track = {
   genre?: string
 }
 
+type PhotoPostClip = {
+  id: string
+  title: string
+  artist: string
+  album?: string
+  previewUrl: string
+  startTime: number
+  duration: number
+}
+
 type SurveySeed = {
   id: string
   title: string
@@ -78,6 +88,7 @@ type PhotoPost = {
   authorId: string
   imageUrl: string
   caption: string
+  clip?: PhotoPostClip | null
   createdAt: number
   author: {
     id: string
@@ -139,12 +150,6 @@ function formatSeconds(totalSeconds: number) {
   const minutes = Math.floor(safe / 60)
   const seconds = safe % 60
   return `${minutes}:${String(seconds).padStart(2, '0')}`
-}
-
-function buildPhotoClipCaption(track: Track, startTime: number, clipDuration: number) {
-  const from = formatSeconds(startTime)
-  const to = formatSeconds(startTime + clipDuration)
-  return `🎵 Clip: ${track.title} - ${track.artist} (${from}-${to})`
 }
 
 function loadImageFromDataUrl(dataUrl: string) {
@@ -972,6 +977,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const [photoClipDuration, setPhotoClipDuration] = useState(15)
   const [postingPhoto, setPostingPhoto] = useState(false)
   const [photoActiveIndex, setPhotoActiveIndex] = useState(0)
+  const [photoPostsMuted, setPhotoPostsMuted] = useState(true)
   const [photoDragStartX, setPhotoDragStartX] = useState<number | null>(null)
   const [photoDragX, setPhotoDragX] = useState(0)
   const [updatingProfilePhoto, setUpdatingProfilePhoto] = useState(false)
@@ -993,6 +999,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const profilePhotoInputRef = useRef<HTMLInputElement | null>(null)
   const photoThreadInputRef = useRef<HTMLInputElement | null>(null)
   const photoEditorRef = useRef<HTMLDivElement | null>(null)
+  const photoPostCardRef = useRef<HTMLElement | null>(null)
   const photoClipTimeoutRef = useRef<number | null>(null)
   const notificationsHydratedRef = useRef(false)
   const matchedByUserRef = useRef<Record<string, boolean>>({})
@@ -1053,6 +1060,13 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   )
   const activeDatingCandidate = remainingDatingCandidates[0] || null
   const activePhotoPost = photoPosts.length ? photoPosts[photoActiveIndex % photoPosts.length] : null
+  const activePhotoCaption = activePhotoPost
+    ? activePhotoPost.caption
+        .split('\n')
+        .filter((line) => !line.trim().startsWith('🎵 Clip:'))
+        .join('\n')
+        .trim()
+    : ''
   const activeFilterStyle = PHOTO_FILTER_PRESETS.find((preset) => preset.id === photoFilterPreset)?.filter || 'none'
   const activeOverlayStops = PHOTO_OVERLAY_PRESETS.find((preset) => preset.id === photoOverlayPreset)?.stops || [
     'transparent',
@@ -1258,6 +1272,32 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
     }, safeDuration * 1000)
   }
 
+  function playPhotoPostClip(post: PhotoPost) {
+    const clip = post.clip
+    if (!clip?.previewUrl) return
+    if (!audioRef.current) {
+      audioRef.current = new Audio()
+    }
+    const clipId = `photo-post-clip-${post.id}`
+    const player = audioRef.current
+    if (activeId === clipId && !player.paused) return
+    if (player.src !== clip.previewUrl) {
+      player.src = clip.previewUrl
+    }
+    const safeStart = clamp(clip.startTime, 0, PHOTO_CLIP_PREVIEW_SECONDS - 1)
+    const safeDuration = clamp(clip.duration, 5, PHOTO_CLIP_PREVIEW_SECONDS - safeStart)
+    player.muted = photoPostsMuted
+    player.currentTime = safeStart
+    player.play().catch(() => {})
+    setActiveId(clipId)
+    clearPhotoClipTimeout()
+    photoClipTimeoutRef.current = window.setTimeout(() => {
+      player.pause()
+      setActiveId((prev) => (prev === clipId ? null : prev))
+      photoClipTimeoutRef.current = null
+    }, safeDuration * 1000)
+  }
+
   async function composePhotoPostImage() {
     if (!photoDraftData) throw new Error('Choose a photo to post.')
     const image = await loadImageFromDataUrl(photoDraftData)
@@ -1340,17 +1380,25 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
       setPostingPhoto(true)
       setPhotoThreadError(null)
       const composedImageData = await composePhotoPostImage()
-      const clipCaption = selectedPhotoClip
-        ? buildPhotoClipCaption(selectedPhotoClip, photoClipStartTime, photoClipDuration)
-        : ''
       const baseCaption = photoDraftCaption.trim()
-      const finalCaption = [baseCaption, clipCaption].filter(Boolean).join('\n')
+      const normalizedPhotoClip = selectedPhotoClip
+        ? {
+            id: selectedPhotoClip.id,
+            title: selectedPhotoClip.title,
+            artist: selectedPhotoClip.artist,
+            album: selectedPhotoClip.album,
+            previewUrl: selectedPhotoClip.previewUrl,
+            startTime: clamp(photoClipStartTime, 0, PHOTO_CLIP_PREVIEW_SECONDS - 1),
+            duration: clamp(photoClipDuration, 5, PHOTO_CLIP_PREVIEW_SECONDS - photoClipStartTime),
+          }
+        : null
       const res = await fetch(`${API_BASE}/api/social/photo-posts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders(sessionToken) },
         body: JSON.stringify({
           imageData: composedImageData,
-          caption: finalCaption,
+          caption: baseCaption,
+          clip: normalizedPhotoClip,
         }),
       })
       const data = await parseResponseJsonSafe<{ error?: string; post?: PhotoPost }>(res)
@@ -1699,6 +1747,42 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
       setPhotoClipDuration(maxDuration)
     }
   }, [photoClipDuration, photoClipStartTime])
+
+  useEffect(() => {
+    if (!photoPostCardRef.current || !activePhotoPost?.clip?.previewUrl || tab !== 'photos') return
+    const clipId = `photo-post-clip-${activePhotoPost.id}`
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && entry.intersectionRatio >= 0.65) {
+          playPhotoPostClip(activePhotoPost)
+          return
+        }
+        if (activeId === clipId && audioRef.current) {
+          audioRef.current.pause()
+          setActiveId(null)
+          clearPhotoClipTimeout()
+        }
+      },
+      {
+        threshold: [0.2, 0.65, 0.95],
+      },
+    )
+    observer.observe(photoPostCardRef.current)
+    return () => {
+      observer.disconnect()
+      if (activeId === clipId && audioRef.current) {
+        audioRef.current.pause()
+        setActiveId(null)
+        clearPhotoClipTimeout()
+      }
+    }
+  }, [activeId, activePhotoPost, tab])
+
+  useEffect(() => {
+    if (!audioRef.current) return
+    if (!activeId?.startsWith('photo-post-clip-')) return
+    audioRef.current.muted = photoPostsMuted
+  }, [activeId, photoPostsMuted])
 
   function handlePlay(track: Track, restart = false) {
     if (!audioRef.current) {
@@ -2708,7 +2792,8 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
               </article>
             ) : (
               <article
-                className="swipe-card"
+                ref={photoPostCardRef}
+                className="swipe-card photo-post-card"
                 style={{ transform: `translateX(${photoDragX}px) rotate(${photoDragX / 22}deg)` }}
                 onPointerDown={(event) => setPhotoDragStartX(event.clientX)}
                 onPointerMove={(event) => {
@@ -2730,18 +2815,38 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
                   setPhotoDragX(0)
                 }}
               >
-                <img src={activePhotoPost.imageUrl} alt="" className="card-artwork" />
-                <div className="card-overlay-gradient" />
-                {photoSwipeLabel && (
-                  <div className={`swipe-chip ${photoSwipeLabel === 'NEXT' ? 'swipe-like' : 'swipe-pass'}`}>
-                    {photoSwipeLabel}
-                  </div>
-                )}
-                <div className="cover-meta">
+                <div className="photo-post-media">
+                  <img src={activePhotoPost.imageUrl} alt="" className="card-artwork" />
+                  {activePhotoPost.clip?.previewUrl && (
+                    <button
+                      className="post-mute-btn"
+                      type="button"
+                      onClick={() => setPhotoPostsMuted((prev) => !prev)}
+                      aria-pressed={photoPostsMuted}
+                    >
+                      {photoPostsMuted ? 'Unmute' : 'Mute'}
+                    </button>
+                  )}
+                  {photoSwipeLabel && (
+                    <div className={`swipe-chip ${photoSwipeLabel === 'NEXT' ? 'swipe-like' : 'swipe-pass'}`}>
+                      {photoSwipeLabel}
+                    </div>
+                  )}
+                </div>
+                <div className="photo-post-meta">
                   <p className="song-artist">
                     {activePhotoPost.author ? `${activePhotoPost.author.name} · @${activePhotoPost.author.handle}` : 'Unknown'}
                   </p>
-                  <p className="card-artist">{activePhotoPost.caption || 'No caption'}</p>
+                  {activePhotoCaption ? <p className="card-artist">{activePhotoCaption}</p> : null}
+                  {activePhotoPost.clip && (
+                    <div className="photo-post-clip-meta">
+                      <p className="song-title">{activePhotoPost.clip.title}</p>
+                      <p className="song-artist">
+                        {activePhotoPost.clip.artist}
+                        {activePhotoPost.clip.album ? ` • ${activePhotoPost.clip.album}` : ''}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </article>
             )}

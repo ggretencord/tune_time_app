@@ -490,6 +490,45 @@
   transition: transform 0.16s ease;
 }
 
+.photo-post-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
+.photo-post-media {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.photo-post-meta {
+  padding: 8px 10px 10px;
+  background: rgba(14, 26, 64, 0.82);
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  display: grid;
+  gap: 4px;
+}
+
+.photo-post-meta .song-title,
+.photo-post-meta .song-artist,
+.photo-post-meta .card-artist {
+  color: #f8fbff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+  margin: 0;
+  line-height: 1.25;
+}
+
+.photo-post-meta .song-title {
+  font-size: 13px;
+}
+
+.photo-post-meta .song-artist,
+.photo-post-meta .card-artist {
+  font-size: 12px;
+}
+
 .swipe-chip {
   position: absolute;
   top: 18px;
@@ -1000,10 +1039,18 @@
   bottom: 12px;
   border-radius: 14px;
   padding: 12px 12px 14px;
-  background: linear-gradient(180deg, rgba(214, 247, 242, 0.42), rgba(23, 48, 106, 0.82));
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(8px);
+  background: linear-gradient(180deg, rgba(14, 26, 64, 0.5), rgba(10, 20, 48, 0.94));
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   z-index: 5;
+}
+
+.cover-meta .song-title,
+.cover-meta .song-artist,
+.cover-meta .card-artist {
+  color: #f8fbff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.75);
 }
 
 .play-btn {
@@ -1022,6 +1069,22 @@
   z-index: 6;
 }
 
+.post-mute-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(23, 48, 106, 0.84);
+  color: #ffffff !important;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 6;
+}
+
 .card-meta {
   margin-top: 14px;
 }
@@ -1036,6 +1099,12 @@
   font-size: 14px;
   color: #f6deff;
   margin: 0;
+}
+
+.photo-post-clip-meta {
+  margin-top: 4px;
+  display: grid;
+  gap: 1px;
 }
 
 .card-album {

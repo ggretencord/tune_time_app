@@ -7,6 +7,7 @@ const app = express();
 const PORT = process.env.PORT || 4010;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const PHOTO_CLIP_PREVIEW_SECONDS = 30;
 const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 app.use(cors());
@@ -161,6 +162,31 @@ function ensureSocialUser(userId) {
   if (!socialFollows.has(userId)) {
     socialFollows.set(userId, new Set());
   }
+}
+
+function normalizePhotoPostClip(clip) {
+  if (!clip || typeof clip !== 'object') return null;
+  const id = String(clip.id || '').trim();
+  const title = String(clip.title || '').trim();
+  const artist = String(clip.artist || '').trim();
+  const previewUrl = String(clip.previewUrl || '').trim();
+  if (!id || !title || !artist || !previewUrl) return null;
+  const album = String(clip.album || '').trim();
+  const rawStart = Number(clip.startTime);
+  const safeStartRaw = Number.isFinite(rawStart) ? rawStart : 0;
+  const startTime = Math.max(0, Math.min(PHOTO_CLIP_PREVIEW_SECONDS - 1, safeStartRaw));
+  const rawDuration = Number(clip.duration);
+  const safeDurationRaw = Number.isFinite(rawDuration) ? rawDuration : 15;
+  const duration = Math.max(5, Math.min(PHOTO_CLIP_PREVIEW_SECONDS - startTime, safeDurationRaw));
+  return {
+    id,
+    title: title.slice(0, 160),
+    artist: artist.slice(0, 140),
+    album: album ? album.slice(0, 140) : undefined,
+    previewUrl,
+    startTime,
+    duration,
+  };
 }
 
 function detectImageMimeType(buffer) {
@@ -860,9 +886,13 @@ app.get('/api/social/photo-posts', requireAuth, (req, res) => {
 });
 
 app.post('/api/social/photo-posts', requireAuth, async (req, res) => {
-  const { imageData, caption } = req.body || {};
+  const { imageData, caption, clip } = req.body || {};
   const authorId = req.authUserId;
   const cleanedCaption = String(caption || '').trim().slice(0, 180);
+  const normalizedClip = normalizePhotoPostClip(clip);
+  if (clip && !normalizedClip) {
+    return res.status(400).json({ error: 'Clip must include id, title, artist, and previewUrl' });
+  }
   const author = socialProfiles.get(authorId);
   if (!author) {
     return res.status(404).json({ error: 'User not found' });
@@ -879,6 +909,7 @@ app.post('/api/social/photo-posts', requireAuth, async (req, res) => {
     authorId,
     imageUrl: moderation.value,
     caption: cleanedCaption,
+    clip: normalizedClip,
     createdAt: Date.now(),
   };
   socialPhotoPosts.unshift(post);
