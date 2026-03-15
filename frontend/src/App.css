@@ -807,6 +807,143 @@
   border-radius: 12px;
 }
 
+.photo-editor-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  background: radial-gradient(circle at top, #c6f2ed, #d6f7f2);
+  touch-action: none;
+}
+
+.photo-editor-image {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform-origin: center;
+}
+
+.photo-editor-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.photo-editor-text {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  z-index: 4;
+  font-weight: 700;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.65);
+  pointer-events: none;
+  text-align: center;
+  width: 92%;
+}
+
+.photo-editor-markup {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.photo-tools-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.photo-tool-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  display: grid;
+  gap: 8px;
+}
+
+.photo-tool-toggle {
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--text-main);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.photo-tool-toggle-active {
+  background: var(--pink-btn-soft-strong);
+  border-color: rgba(255, 47, 166, 0.45);
+}
+
+.photo-tool-body {
+  display: grid;
+  gap: 8px;
+}
+
+.photo-slider-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.photo-range-label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.photo-range-label input[type='range'] {
+  width: 100%;
+}
+
+.photo-inline-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.photo-inline-controls > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.photo-color-label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.photo-color-label input[type='color'] {
+  width: 100%;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: #ffffff;
+  padding: 0;
+}
+
+.photo-clip-selected {
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+
 .card {
   min-height: calc(100vh - 56px);
   display: flex;

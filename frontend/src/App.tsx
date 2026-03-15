@@ -87,10 +87,74 @@ type PhotoPost = {
   } | null
 }
 
+type PhotoFilterPreset = 'none' | 'vivid' | 'noir' | 'vintage' | 'cool' | 'dreamy'
+type PhotoOverlayPreset = 'none' | 'sunset' | 'ocean' | 'midnight' | 'rose'
+
+type PhotoMarkupPoint = {
+  x: number
+  y: number
+}
+
+type PhotoMarkupStroke = {
+  id: string
+  color: string
+  size: number
+  points: PhotoMarkupPoint[]
+}
+
+const PHOTO_FILTER_PRESETS: Array<{ id: PhotoFilterPreset; label: string; filter: string }> = [
+  { id: 'none', label: 'Original', filter: 'none' },
+  { id: 'vivid', label: 'Vivid', filter: 'contrast(1.2) saturate(1.35) brightness(1.05)' },
+  { id: 'noir', label: 'Noir', filter: 'grayscale(1) contrast(1.25) brightness(0.9)' },
+  { id: 'vintage', label: 'Vintage', filter: 'sepia(0.5) contrast(1.06) saturate(0.92)' },
+  { id: 'cool', label: 'Cool', filter: 'hue-rotate(12deg) saturate(1.08) brightness(1.03)' },
+  { id: 'dreamy', label: 'Dreamy', filter: 'saturate(1.18) brightness(1.08) blur(0.4px)' },
+]
+
+const PHOTO_OVERLAY_PRESETS: Array<{
+  id: PhotoOverlayPreset
+  label: string
+  stops: [string, string, string]
+}> = [
+  { id: 'none', label: 'None', stops: ['transparent', 'transparent', 'transparent'] },
+  { id: 'sunset', label: 'Sunset', stops: ['rgba(255, 125, 92, 0.55)', 'rgba(255, 96, 160, 0.35)', 'rgba(67, 35, 148, 0.45)'] },
+  { id: 'ocean', label: 'Ocean', stops: ['rgba(50, 186, 223, 0.5)', 'rgba(32, 110, 218, 0.38)', 'rgba(9, 42, 122, 0.44)'] },
+  { id: 'midnight', label: 'Midnight', stops: ['rgba(51, 25, 104, 0.44)', 'rgba(22, 42, 108, 0.46)', 'rgba(10, 17, 48, 0.6)'] },
+  { id: 'rose', label: 'Rose', stops: ['rgba(255, 142, 214, 0.55)', 'rgba(252, 98, 149, 0.42)', 'rgba(92, 12, 75, 0.45)'] },
+]
+
+const PHOTO_CLIP_PREVIEW_SECONDS = 30
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const SESSION_STORAGE_KEY = 'tune_time_session_token'
 const DATING_MOOD_OPTIONS = ['chill', 'hype', 'sad', 'focus', 'party', 'romantic'] as const
 const DATING_GENDER_OPTIONS: DatingGenderOption[] = ['male', 'female', 'would rather not say']
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function formatSeconds(totalSeconds: number) {
+  const safe = Math.max(0, Math.floor(totalSeconds))
+  const minutes = Math.floor(safe / 60)
+  const seconds = safe % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
+function buildPhotoClipCaption(track: Track, startTime: number, clipDuration: number) {
+  const from = formatSeconds(startTime)
+  const to = formatSeconds(startTime + clipDuration)
+  return `🎵 Clip: ${track.title} - ${track.artist} (${from}-${to})`
+}
+
+function loadImageFromDataUrl(dataUrl: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('Could not load image'))
+    image.src = dataUrl
+  })
+}
 
 function getSurveyStorageKey(userId: string) {
   return `tune_time_survey_complete_${userId}`
@@ -878,6 +942,34 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const [photoThreadError, setPhotoThreadError] = useState<string | null>(null)
   const [photoDraftData, setPhotoDraftData] = useState<string | null>(null)
   const [photoDraftCaption, setPhotoDraftCaption] = useState('')
+  const [photoFilterPreset, setPhotoFilterPreset] = useState<PhotoFilterPreset>('none')
+  const [photoOverlayPreset, setPhotoOverlayPreset] = useState<PhotoOverlayPreset>('none')
+  const [photoOverlayOpacity, setPhotoOverlayOpacity] = useState(45)
+  const [photoBrightness, setPhotoBrightness] = useState(100)
+  const [photoContrast, setPhotoContrast] = useState(100)
+  const [photoSaturation, setPhotoSaturation] = useState(100)
+  const [photoBlur, setPhotoBlur] = useState(0)
+  const [photoZoom, setPhotoZoom] = useState(100)
+  const [photoRotation, setPhotoRotation] = useState(0)
+  const [photoTextOverlay, setPhotoTextOverlay] = useState('')
+  const [photoTextColor, setPhotoTextColor] = useState('#ffffff')
+  const [photoTextSize, setPhotoTextSize] = useState(30)
+  const [photoTextX, setPhotoTextX] = useState(50)
+  const [photoTextY, setPhotoTextY] = useState(68)
+  const [photoMarkupColor, setPhotoMarkupColor] = useState('#ffffff')
+  const [photoMarkupSize, setPhotoMarkupSize] = useState(7)
+  const [photoMarkupStrokes, setPhotoMarkupStrokes] = useState<PhotoMarkupStroke[]>([])
+  const [drawingPhotoStroke, setDrawingPhotoStroke] = useState<PhotoMarkupStroke | null>(null)
+  const [photoOpenTool, setPhotoOpenTool] = useState<
+    'none' | 'filters' | 'edit' | 'words' | 'markup' | 'clip'
+  >('none')
+  const [photoClipQuery, setPhotoClipQuery] = useState('')
+  const [photoClipResults, setPhotoClipResults] = useState<Track[]>([])
+  const [photoClipLoading, setPhotoClipLoading] = useState(false)
+  const [photoClipError, setPhotoClipError] = useState<string | null>(null)
+  const [selectedPhotoClip, setSelectedPhotoClip] = useState<Track | null>(null)
+  const [photoClipStartTime, setPhotoClipStartTime] = useState(0)
+  const [photoClipDuration, setPhotoClipDuration] = useState(15)
   const [postingPhoto, setPostingPhoto] = useState(false)
   const [photoActiveIndex, setPhotoActiveIndex] = useState(0)
   const [photoDragStartX, setPhotoDragStartX] = useState<number | null>(null)
@@ -898,6 +990,8 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const [globalClipError, setGlobalClipError] = useState<string | null>(null)
   const profilePhotoInputRef = useRef<HTMLInputElement | null>(null)
   const photoThreadInputRef = useRef<HTMLInputElement | null>(null)
+  const photoEditorRef = useRef<HTMLDivElement | null>(null)
+  const photoClipTimeoutRef = useRef<number | null>(null)
 
   const currentTrack = items.length ? items[activeIndex % items.length] : null
   const selectedUser = socialUsers.find((u) => u.id === selectedUserId) || null
@@ -954,6 +1048,14 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   )
   const activeDatingCandidate = remainingDatingCandidates[0] || null
   const activePhotoPost = photoPosts.length ? photoPosts[photoActiveIndex % photoPosts.length] : null
+  const activeFilterStyle = PHOTO_FILTER_PRESETS.find((preset) => preset.id === photoFilterPreset)?.filter || 'none'
+  const activeOverlayStops = PHOTO_OVERLAY_PRESETS.find((preset) => preset.id === photoOverlayPreset)?.stops || [
+    'transparent',
+    'transparent',
+    'transparent',
+  ]
+  const activePhotoTransform = `translate(-50%, -50%) scale(${photoZoom / 100}) rotate(${photoRotation}deg)`
+  const activePhotoFilter = `${activeFilterStyle} brightness(${photoBrightness}%) contrast(${photoContrast}%) saturate(${photoSaturation}%) blur(${photoBlur}px)`.trim()
 
   function toggleDatingMoodFilter(mood: string) {
     setDatingMoodFilters((prev) =>
@@ -1008,11 +1110,201 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
     }
     try {
       const imageData = await fileToDataUrl(file)
+      resetPhotoDraftComposer(false)
       setPhotoDraftData(imageData)
-      setPhotoThreadError(null)
     } catch {
       setPhotoThreadError('Could not read that photo. Try a different file.')
     }
+  }
+
+  function getRelativePhotoPoint(event: React.PointerEvent<HTMLDivElement>) {
+    const editor = photoEditorRef.current
+    if (!editor) return null
+    const rect = editor.getBoundingClientRect()
+    if (!rect.width || !rect.height) return null
+    return {
+      x: clamp((event.clientX - rect.left) / rect.width, 0, 1),
+      y: clamp((event.clientY - rect.top) / rect.height, 0, 1),
+    }
+  }
+
+  function handlePhotoMarkupPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (!photoDraftData) return
+    const point = getRelativePhotoPoint(event)
+    if (!point) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setDrawingPhotoStroke({
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      color: photoMarkupColor,
+      size: photoMarkupSize,
+      points: [point],
+    })
+  }
+
+  function handlePhotoMarkupPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    if (!drawingPhotoStroke) return
+    const point = getRelativePhotoPoint(event)
+    if (!point) return
+    setDrawingPhotoStroke((prev) =>
+      prev
+        ? {
+            ...prev,
+            points: [...prev.points, point],
+          }
+        : prev,
+    )
+  }
+
+  function finishPhotoMarkupStroke() {
+    setDrawingPhotoStroke((prev) => {
+      if (!prev || prev.points.length < 2) return null
+      setPhotoMarkupStrokes((existing) => [...existing, prev])
+      return null
+    })
+  }
+
+  function clearPhotoClipTimeout() {
+    if (photoClipTimeoutRef.current !== null) {
+      window.clearTimeout(photoClipTimeoutRef.current)
+      photoClipTimeoutRef.current = null
+    }
+  }
+
+  function resetPhotoDraftComposer(clearDraftImage = true) {
+    clearPhotoClipTimeout()
+    if (activeId?.startsWith('photo-clip-') && audioRef.current) {
+      audioRef.current.pause()
+      setActiveId(null)
+    }
+    if (clearDraftImage) setPhotoDraftData(null)
+    setPhotoDraftCaption('')
+    setPhotoFilterPreset('none')
+    setPhotoOverlayPreset('none')
+    setPhotoOverlayOpacity(45)
+    setPhotoBrightness(100)
+    setPhotoContrast(100)
+    setPhotoSaturation(100)
+    setPhotoBlur(0)
+    setPhotoZoom(100)
+    setPhotoRotation(0)
+    setPhotoTextOverlay('')
+    setPhotoTextColor('#ffffff')
+    setPhotoTextSize(30)
+    setPhotoTextX(50)
+    setPhotoTextY(68)
+    setPhotoMarkupStrokes([])
+    setDrawingPhotoStroke(null)
+    setPhotoOpenTool('none')
+    setSelectedPhotoClip(null)
+    setPhotoClipQuery('')
+    setPhotoClipResults([])
+    setPhotoClipError(null)
+    setPhotoClipStartTime(0)
+    setPhotoClipDuration(15)
+    setPhotoThreadError(null)
+    if (photoThreadInputRef.current) photoThreadInputRef.current.value = ''
+  }
+
+  function handlePlayPhotoClip() {
+    if (!selectedPhotoClip?.previewUrl) return
+    if (!audioRef.current) {
+      audioRef.current = new Audio()
+    }
+    const clipId = `photo-clip-${selectedPhotoClip.id}`
+    const player = audioRef.current
+    if (activeId === clipId && !player.paused) {
+      player.pause()
+      setActiveId(null)
+      clearPhotoClipTimeout()
+      return
+    }
+    if (player.src !== selectedPhotoClip.previewUrl) {
+      player.src = selectedPhotoClip.previewUrl
+    }
+    const safeStart = clamp(photoClipStartTime, 0, PHOTO_CLIP_PREVIEW_SECONDS - 1)
+    const safeDuration = clamp(photoClipDuration, 5, PHOTO_CLIP_PREVIEW_SECONDS - safeStart)
+    player.currentTime = safeStart
+    player.play().catch(() => {})
+    setActiveId(clipId)
+    clearPhotoClipTimeout()
+    photoClipTimeoutRef.current = window.setTimeout(() => {
+      player.pause()
+      setActiveId((prev) => (prev === clipId ? null : prev))
+      photoClipTimeoutRef.current = null
+    }, safeDuration * 1000)
+  }
+
+  async function composePhotoPostImage() {
+    if (!photoDraftData) throw new Error('Choose a photo to post.')
+    const image = await loadImageFromDataUrl(photoDraftData)
+    const maxSide = 1280
+    const initialWidth = image.naturalWidth || image.width
+    const initialHeight = image.naturalHeight || image.height
+    const scale = Math.min(1, maxSide / Math.max(initialWidth, initialHeight))
+    const width = Math.max(1, Math.round(initialWidth * scale))
+    const height = Math.max(1, Math.round(initialHeight * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Could not create image editor')
+
+    ctx.save()
+    ctx.filter = activePhotoFilter || 'none'
+    ctx.translate(width / 2, height / 2)
+    ctx.rotate((photoRotation * Math.PI) / 180)
+    ctx.scale(photoZoom / 100, photoZoom / 100)
+    ctx.drawImage(image, -width / 2, -height / 2, width, height)
+    ctx.restore()
+
+    if (photoOverlayPreset !== 'none' && photoOverlayOpacity > 0) {
+      const gradient = ctx.createLinearGradient(0, 0, width, height)
+      gradient.addColorStop(0, activeOverlayStops[0])
+      gradient.addColorStop(0.45, activeOverlayStops[1])
+      gradient.addColorStop(1, activeOverlayStops[2])
+      ctx.save()
+      ctx.globalAlpha = clamp(photoOverlayOpacity, 0, 100) / 100
+      ctx.fillStyle = gradient
+      ctx.fillRect(0, 0, width, height)
+      ctx.restore()
+    }
+
+    for (const stroke of photoMarkupStrokes) {
+      if (stroke.points.length < 2) continue
+      ctx.beginPath()
+      stroke.points.forEach((point, index) => {
+        const x = point.x * width
+        const y = point.y * height
+        if (index === 0) ctx.moveTo(x, y)
+        else ctx.lineTo(x, y)
+      })
+      ctx.strokeStyle = stroke.color
+      ctx.lineWidth = Math.max(1.6, stroke.size * (Math.min(width, height) / 360))
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      ctx.stroke()
+    }
+
+    if (photoTextOverlay.trim()) {
+      const textX = (clamp(photoTextX, 0, 100) / 100) * width
+      const textY = (clamp(photoTextY, 0, 100) / 100) * height
+      const textSizePx = Math.max(12, photoTextSize * (Math.min(width, height) / 360))
+      ctx.save()
+      ctx.font = `700 ${textSizePx}px system-ui, -apple-system, sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillStyle = photoTextColor
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.45)'
+      ctx.shadowBlur = 10
+      ctx.shadowOffsetY = 2
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)'
+      ctx.lineWidth = Math.max(1, textSizePx * 0.06)
+      ctx.strokeText(photoTextOverlay.trim(), textX, textY)
+      ctx.fillText(photoTextOverlay.trim(), textX, textY)
+      ctx.restore()
+    }
+
+    return canvas.toDataURL('image/jpeg', 0.92)
   }
 
   async function handleCreatePhotoPost() {
@@ -1023,12 +1315,18 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
     try {
       setPostingPhoto(true)
       setPhotoThreadError(null)
+      const composedImageData = await composePhotoPostImage()
+      const clipCaption = selectedPhotoClip
+        ? buildPhotoClipCaption(selectedPhotoClip, photoClipStartTime, photoClipDuration)
+        : ''
+      const baseCaption = photoDraftCaption.trim()
+      const finalCaption = [baseCaption, clipCaption].filter(Boolean).join('\n')
       const res = await fetch(`${API_BASE}/api/social/photo-posts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders(sessionToken) },
         body: JSON.stringify({
-          imageData: photoDraftData,
-          caption: photoDraftCaption,
+          imageData: composedImageData,
+          caption: finalCaption,
         }),
       })
       const data = await parseResponseJsonSafe<{ error?: string; post?: PhotoPost }>(res)
@@ -1037,9 +1335,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
       }
       setPhotoPosts((prev) => [data.post as PhotoPost, ...prev])
       setPhotoActiveIndex(0)
-      setPhotoDraftData(null)
-      setPhotoDraftCaption('')
-      if (photoThreadInputRef.current) photoThreadInputRef.current.value = ''
+      resetPhotoDraftComposer(true)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not create photo post'
       setPhotoThreadError(message)
@@ -1150,6 +1446,10 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
     player.addEventListener('loadedmetadata', onLoadedMeta)
     player.addEventListener('ended', onEnded)
     return () => {
+      if (photoClipTimeoutRef.current !== null) {
+        window.clearTimeout(photoClipTimeoutRef.current)
+        photoClipTimeoutRef.current = null
+      }
       player.pause()
       player.removeEventListener('loadedmetadata', onLoadedMeta)
       player.removeEventListener('ended', onEnded)
@@ -1224,6 +1524,51 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
       controller.abort()
     }
   }, [globalClipQuery])
+
+  useEffect(() => {
+    const trimmedQuery = photoClipQuery.trim()
+    if (!trimmedQuery) {
+      setPhotoClipResults([])
+      setPhotoClipError(null)
+      setPhotoClipLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => {
+      async function searchPhotoClip() {
+        setPhotoClipLoading(true)
+        setPhotoClipError(null)
+        try {
+          const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(trimmedQuery)}`, {
+            signal: controller.signal,
+          })
+          if (!res.ok) throw new Error('Clip search failed')
+          const data = (await res.json()) as { tracks?: Track[] }
+          setPhotoClipResults(Array.isArray(data.tracks) ? data.tracks.slice(0, 6) : [])
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') return
+          setPhotoClipError('Could not search clips right now.')
+          setPhotoClipResults([])
+        } finally {
+          setPhotoClipLoading(false)
+        }
+      }
+      searchPhotoClip()
+    }, 250)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+      controller.abort()
+    }
+  }, [photoClipQuery])
+
+  useEffect(() => {
+    const maxDuration = Math.max(5, PHOTO_CLIP_PREVIEW_SECONDS - photoClipStartTime)
+    if (photoClipDuration > maxDuration) {
+      setPhotoClipDuration(maxDuration)
+    }
+  }, [photoClipDuration, photoClipStartTime])
 
   function handlePlay(track: Track, restart = false) {
     if (!audioRef.current) {
@@ -1886,9 +2231,338 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
               placeholder="Add a short caption (optional)"
               maxLength={180}
             />
-            {photoDraftData && <img src={photoDraftData} alt="Post preview" className="photo-post-preview" />}
+            {photoDraftData && (
+              <>
+                <div
+                  ref={photoEditorRef}
+                  className="photo-editor-stage"
+                  onPointerDown={handlePhotoMarkupPointerDown}
+                  onPointerMove={handlePhotoMarkupPointerMove}
+                  onPointerUp={finishPhotoMarkupStroke}
+                  onPointerCancel={finishPhotoMarkupStroke}
+                >
+                  <img
+                    src={photoDraftData}
+                    alt="Post preview"
+                    className="photo-editor-image"
+                    style={{
+                      filter: activePhotoFilter,
+                      transform: activePhotoTransform,
+                    }}
+                  />
+                  {photoOverlayPreset !== 'none' && (
+                    <div
+                      className="photo-editor-overlay"
+                      style={{
+                        opacity: photoOverlayOpacity / 100,
+                        background: `linear-gradient(135deg, ${activeOverlayStops[0]}, ${activeOverlayStops[1]}, ${activeOverlayStops[2]})`,
+                      }}
+                    />
+                  )}
+                  {photoTextOverlay.trim() && (
+                    <p
+                      className="photo-editor-text"
+                      style={{
+                        color: photoTextColor,
+                        fontSize: `${photoTextSize}px`,
+                        left: `${photoTextX}%`,
+                        top: `${photoTextY}%`,
+                      }}
+                    >
+                      {photoTextOverlay.trim()}
+                    </p>
+                  )}
+                  <svg className="photo-editor-markup" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                    {[...photoMarkupStrokes, ...(drawingPhotoStroke ? [drawingPhotoStroke] : [])].map((stroke) => (
+                      <polyline
+                        key={stroke.id}
+                        points={stroke.points.map((point) => `${point.x * 100},${point.y * 100}`).join(' ')}
+                        fill="none"
+                        stroke={stroke.color}
+                        strokeWidth={Math.max(0.5, stroke.size / 2.2)}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    ))}
+                  </svg>
+                </div>
+
+                <div className="photo-tools-grid">
+                  <div className="photo-tool-card">
+                    <button
+                      className={`photo-tool-toggle ${photoOpenTool === 'filters' ? 'photo-tool-toggle-active' : ''}`}
+                      type="button"
+                      onClick={() => setPhotoOpenTool((prev) => (prev === 'filters' ? 'none' : 'filters'))}
+                    >
+                      Filters
+                    </button>
+                    {photoOpenTool === 'filters' && (
+                      <div className="photo-tool-body">
+                        <div className="chips-row">
+                          {PHOTO_FILTER_PRESETS.map((preset) => (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              className={`chip ${photoFilterPreset === preset.id ? 'chip-selected' : ''}`}
+                              onClick={() => setPhotoFilterPreset(preset.id)}
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="photo-tool-card">
+                    <button
+                      className={`photo-tool-toggle ${photoOpenTool === 'edit' ? 'photo-tool-toggle-active' : ''}`}
+                      type="button"
+                      onClick={() => setPhotoOpenTool((prev) => (prev === 'edit' ? 'none' : 'edit'))}
+                    >
+                      Edit
+                    </button>
+                    {photoOpenTool === 'edit' && (
+                      <div className="photo-tool-body">
+                        <div className="photo-slider-grid">
+                          <label className="photo-range-label">
+                            Brightness
+                            <input type="range" min={70} max={140} value={photoBrightness} onChange={(e) => setPhotoBrightness(Number(e.target.value))} />
+                          </label>
+                          <label className="photo-range-label">
+                            Contrast
+                            <input type="range" min={70} max={150} value={photoContrast} onChange={(e) => setPhotoContrast(Number(e.target.value))} />
+                          </label>
+                          <label className="photo-range-label">
+                            Saturation
+                            <input type="range" min={40} max={180} value={photoSaturation} onChange={(e) => setPhotoSaturation(Number(e.target.value))} />
+                          </label>
+                          <label className="photo-range-label">
+                            Blur
+                            <input type="range" min={0} max={5} step={0.2} value={photoBlur} onChange={(e) => setPhotoBlur(Number(e.target.value))} />
+                          </label>
+                          <label className="photo-range-label">
+                            Zoom
+                            <input type="range" min={85} max={145} value={photoZoom} onChange={(e) => setPhotoZoom(Number(e.target.value))} />
+                          </label>
+                          <label className="photo-range-label">
+                            Rotation
+                            <input type="range" min={-20} max={20} value={photoRotation} onChange={(e) => setPhotoRotation(Number(e.target.value))} />
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="photo-tool-card">
+                    <button
+                      className={`photo-tool-toggle ${photoOpenTool === 'words' ? 'photo-tool-toggle-active' : ''}`}
+                      type="button"
+                      onClick={() => setPhotoOpenTool((prev) => (prev === 'words' ? 'none' : 'words'))}
+                    >
+                      Words + overlays
+                    </button>
+                    {photoOpenTool === 'words' && (
+                      <div className="photo-tool-body">
+                        <input
+                          className="search-input"
+                          value={photoTextOverlay}
+                          onChange={(e) => setPhotoTextOverlay(e.target.value)}
+                          placeholder="Add text on top of your post"
+                          maxLength={80}
+                        />
+                        <div className="photo-inline-controls">
+                          <label className="photo-color-label">
+                            Text color
+                            <input type="color" value={photoTextColor} onChange={(e) => setPhotoTextColor(e.target.value)} />
+                          </label>
+                          <label className="photo-range-label">
+                            Size
+                            <input type="range" min={16} max={52} value={photoTextSize} onChange={(e) => setPhotoTextSize(Number(e.target.value))} />
+                          </label>
+                        </div>
+                        <div className="photo-slider-grid">
+                          <label className="photo-range-label">
+                            Text X
+                            <input type="range" min={5} max={95} value={photoTextX} onChange={(e) => setPhotoTextX(Number(e.target.value))} />
+                          </label>
+                          <label className="photo-range-label">
+                            Text Y
+                            <input type="range" min={8} max={92} value={photoTextY} onChange={(e) => setPhotoTextY(Number(e.target.value))} />
+                          </label>
+                        </div>
+                        <div className="chips-row">
+                          {PHOTO_OVERLAY_PRESETS.map((preset) => (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              className={`chip ${photoOverlayPreset === preset.id ? 'chip-selected' : ''}`}
+                              onClick={() => setPhotoOverlayPreset(preset.id)}
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                        <label className="photo-range-label">
+                          Overlay strength
+                          <input
+                            type="range"
+                            min={0}
+                            max={85}
+                            value={photoOverlayOpacity}
+                            onChange={(e) => setPhotoOverlayOpacity(Number(e.target.value))}
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="photo-tool-card">
+                    <button
+                      className={`photo-tool-toggle ${photoOpenTool === 'markup' ? 'photo-tool-toggle-active' : ''}`}
+                      type="button"
+                      onClick={() => setPhotoOpenTool((prev) => (prev === 'markup' ? 'none' : 'markup'))}
+                    >
+                      Mark-up (draw on preview)
+                    </button>
+                    {photoOpenTool === 'markup' && (
+                      <div className="photo-tool-body">
+                        <div className="photo-inline-controls">
+                          <label className="photo-color-label">
+                            Pen color
+                            <input type="color" value={photoMarkupColor} onChange={(e) => setPhotoMarkupColor(e.target.value)} />
+                          </label>
+                          <label className="photo-range-label">
+                            Pen size
+                            <input type="range" min={2} max={20} value={photoMarkupSize} onChange={(e) => setPhotoMarkupSize(Number(e.target.value))} />
+                          </label>
+                        </div>
+                        <div className="photo-inline-controls">
+                          <button
+                            className="mini-btn"
+                            type="button"
+                            onClick={() => setPhotoMarkupStrokes((prev) => prev.slice(0, -1))}
+                            disabled={!photoMarkupStrokes.length}
+                          >
+                            Undo Markup
+                          </button>
+                          <button
+                            className="mini-btn"
+                            type="button"
+                            onClick={() => {
+                              setPhotoMarkupStrokes([])
+                              setDrawingPhotoStroke(null)
+                            }}
+                            disabled={!photoMarkupStrokes.length && !drawingPhotoStroke}
+                          >
+                            Clear Markup
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="photo-tool-card">
+                    <button
+                      className={`photo-tool-toggle ${photoOpenTool === 'clip' ? 'photo-tool-toggle-active' : ''}`}
+                      type="button"
+                      onClick={() => setPhotoOpenTool((prev) => (prev === 'clip' ? 'none' : 'clip'))}
+                    >
+                      Song clip
+                    </button>
+                    {photoOpenTool === 'clip' && (
+                      <div className="photo-tool-body">
+                        <input
+                          className="search-input"
+                          value={photoClipQuery}
+                          onChange={(e) => setPhotoClipQuery(e.target.value)}
+                          placeholder="Search a clip to attach"
+                        />
+                        {photoClipQuery.trim() && (
+                          <div className="search-results">
+                            {photoClipLoading ? (
+                              <p className="empty-text global-search-message">Searching song clips...</p>
+                            ) : photoClipError ? (
+                              <p className="error-text global-search-message">{photoClipError}</p>
+                            ) : photoClipResults.length === 0 ? (
+                              <p className="empty-text global-search-message">No clips found.</p>
+                            ) : (
+                              photoClipResults.map((song) => (
+                                <button
+                                  key={`photo-clip-result-${song.id}`}
+                                  className={`result-row ${selectedPhotoClip?.id === song.id ? 'result-row-selected' : ''}`}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedPhotoClip(song)
+                                    setPhotoClipQuery('')
+                                    setPhotoClipResults([])
+                                    setPhotoClipError(null)
+                                    setPhotoClipStartTime(0)
+                                    setPhotoClipDuration(15)
+                                  }}
+                                >
+                                  {song.artworkUrl && <img src={song.artworkUrl} alt="" className="result-artwork" />}
+                                  <span className="result-meta">
+                                    <span className="song-title">{song.title}</span>
+                                    <span className="song-artist">{song.artist}</span>
+                                  </span>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
+                        {selectedPhotoClip && (
+                          <div className="photo-clip-selected">
+                            <p className="song-title">{selectedPhotoClip.title}</p>
+                            <p className="song-artist">
+                              {selectedPhotoClip.artist} · {formatSeconds(photoClipStartTime)}-{formatSeconds(photoClipStartTime + photoClipDuration)}
+                            </p>
+                            <label className="photo-range-label">
+                              Clip start
+                              <input
+                                type="range"
+                                min={0}
+                                max={Math.max(0, PHOTO_CLIP_PREVIEW_SECONDS - photoClipDuration)}
+                                value={photoClipStartTime}
+                                onChange={(e) => setPhotoClipStartTime(Number(e.target.value))}
+                              />
+                            </label>
+                            <label className="photo-range-label">
+                              Clip duration
+                              <input
+                                type="range"
+                                min={5}
+                                max={Math.max(5, PHOTO_CLIP_PREVIEW_SECONDS - photoClipStartTime)}
+                                value={photoClipDuration}
+                                onChange={(e) => setPhotoClipDuration(Number(e.target.value))}
+                              />
+                            </label>
+                            <div className="photo-inline-controls">
+                              <button className="mini-btn" type="button" onClick={handlePlayPhotoClip}>
+                                {activeId === `photo-clip-${selectedPhotoClip.id}` ? 'Pause clip' : 'Preview clip'}
+                              </button>
+                              <button className="mini-btn" type="button" onClick={() => setSelectedPhotoClip(null)}>
+                                Remove clip
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
             <button className="primary-btn" type="button" onClick={handleCreatePhotoPost} disabled={postingPhoto}>
-              {postingPhoto ? 'Posting...' : 'Post Photo'}
+              {postingPhoto ? 'Posting...' : photoDraftData ? 'Post Edited Photo' : 'Post Photo'}
+            </button>
+            <button
+              className="mini-btn"
+              type="button"
+              onClick={() => resetPhotoDraftComposer(true)}
+              disabled={!photoDraftData || postingPhoto}
+            >
+              Delete draft
             </button>
           </section>
 
