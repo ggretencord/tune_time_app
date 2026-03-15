@@ -732,11 +732,11 @@
 .chat-me {
   margin-left: auto;
   background: rgba(255, 47, 166, 0.24);
-  color: #ffe6f5;
+  color: #800000;
 }
 
 .chat-them {
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(63, 140, 255, 0.3);
   color: var(--text-main);
 }
 
