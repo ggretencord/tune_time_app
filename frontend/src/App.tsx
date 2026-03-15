@@ -882,7 +882,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
         : 'Open your match mode to share songs.'
   const swipeLabel = dragX > 80 ? 'LIKE' : dragX < -80 ? 'PASS' : null
   const datingSwipeLabel = datingDragX > 80 ? 'LIKE' : datingDragX < -80 ? 'PASS' : null
-  const photoSwipeLabel = photoDragX > 80 ? 'NEXT' : photoDragX < -80 ? 'BACK' : null
+  const photoSwipeLabel = photoDragX > 80 ? 'NEXT' : photoDragX < -80 ? 'NEXT' : null
   const datingCandidates = useMemo(() => {
     return socialUsers
       .filter((user) => user.id !== viewer.id)
@@ -1862,7 +1862,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
                   if (photoDragX > 90) {
                     stepPhotoThread('next')
                   } else if (photoDragX < -90) {
-                    stepPhotoThread('back')
+                    stepPhotoThread('next')
                   } else {
                     setPhotoDragX(0)
                   }
