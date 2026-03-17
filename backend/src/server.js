@@ -68,6 +68,14 @@ function verifyPassword(password, storedHash) {
   return crypto.timingSafeEqual(actual, expected);
 }
 
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 function createSession(userId) {
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = Date.now() + SESSION_TTL_MS;
@@ -112,6 +120,7 @@ function getPersistedProfilesPayload() {
     .map((profile) => ({
       id: String(profile.id || ''),
       name: String(profile.name || ''),
+      email: normalizeEmail(profile.email),
       handle: String(profile.handle || ''),
       bio: String(profile.bio || ''),
       birthday: String(profile.birthday || ''),
@@ -178,6 +187,7 @@ async function loadPersistedAccounts() {
     socialProfiles.set(id, {
       id,
       name: String(profile?.name || id),
+      email: normalizeEmail(profile?.email),
       handle,
       bio: String(profile?.bio || 'Music fan'),
       birthday: String(profile?.birthday || '2000-01-01'),
@@ -680,6 +690,15 @@ function toSocialUser(viewerId, profile) {
   };
 }
 
+function toProfileSummary(profile) {
+  return {
+    id: profile.id,
+    name: profile.name,
+    handle: profile.handle,
+    profileImageUrl: String(profile.profileImageUrl || ''),
+  };
+}
+
 // Helper: call iTunes Search API for tracks
 async function searchTracks(query, limit = 20) {
   const url = new URL('https://itunes.apple.com/search');
@@ -849,8 +868,9 @@ app.post('/api/survey', requireAuth, async (req, res) => {
 });
 
 app.post('/api/account/register', async (req, res) => {
-  const { name, handle, bio, birthday, gender, matchOpen, password, profileImageData } = req.body || {};
+  const { name, email, handle, bio, birthday, gender, matchOpen, password, profileImageData } = req.body || {};
   const cleanedName = String(name || '').trim();
+  const cleanedEmail = normalizeEmail(email);
   const cleanedHandle = String(handle || '')
     .trim()
     .toLowerCase()
@@ -862,10 +882,20 @@ app.post('/api/account/register', async (req, res) => {
     .toLowerCase();
   const cleanedPassword = String(password || '');
 
-  if (!cleanedName || !cleanedHandle || !cleanedBirthday || !cleanedPassword || !cleanedGender) {
+  if (
+    !cleanedName ||
+    !cleanedEmail ||
+    !cleanedHandle ||
+    !cleanedBirthday ||
+    !cleanedPassword ||
+    !cleanedGender
+  ) {
     return res
       .status(400)
-      .json({ error: 'name, handle, birthday, gender, and password are required' });
+      .json({ error: 'name, email, handle, birthday, gender, and password are required' });
+  }
+  if (!isValidEmail(cleanedEmail)) {
+    return res.status(400).json({ error: 'email must be a valid email address' });
   }
   if (!ALLOWED_GENDERS.has(cleanedGender)) {
     return res.status(400).json({ error: 'gender must be male, female, or would rather not say' });
@@ -891,11 +921,18 @@ app.post('/api/account/register', async (req, res) => {
   if (taken) {
     return res.status(409).json({ error: 'That handle is already taken' });
   }
+  const emailTaken = Array.from(socialProfiles.values()).some(
+    (profile) => normalizeEmail(profile.email) === cleanedEmail
+  );
+  if (emailTaken) {
+    return res.status(409).json({ error: 'That email is already registered' });
+  }
 
   const userId = `user_${Date.now().toString(36)}`;
   socialProfiles.set(userId, {
     id: userId,
     name: cleanedName,
+    email: cleanedEmail,
     handle: cleanedHandle,
     bio: cleanedBio || 'Music fan',
     birthday: cleanedBirthday,
@@ -1236,6 +1273,77 @@ app.get('/api/social/photo-posts', requireAuth, (req, res) => {
       };
     });
   return res.json({ posts });
+});
+
+app.get('/api/social/profiles/:userId', requireAuth, (req, res) => {
+  const viewerId = req.authUserId;
+  const targetId = String(req.params.userId || '').trim();
+  if (!targetId) {
+    return res.status(400).json({ error: 'userId is required' });
+  }
+  if (!socialProfiles.has(targetId)) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  ensureSocialUser(viewerId);
+  ensureSocialUser(targetId);
+
+  const targetProfile = socialProfiles.get(targetId);
+  const profile = toSocialUser(viewerId, targetProfile);
+  const canSeePosts = canViewPhotoPosts(viewerId, targetId);
+
+  const posts = canSeePosts
+    ? socialPhotoPosts
+        .filter((post) => post.authorId === targetId)
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .map((post) => ({
+          ...post,
+          author: {
+            id: targetProfile.id,
+            name: targetProfile.name,
+            handle: targetProfile.handle,
+            profileImageUrl: String(targetProfile.profileImageUrl || ''),
+          },
+        }))
+    : [];
+
+  const targetFollows = socialFollows.get(targetId) || new Set();
+  const matches = Array.from(socialProfiles.values())
+    .filter((candidate) => candidate.id !== targetId)
+    .filter((candidate) =>
+      isMutualMatch(
+        targetProfile,
+        candidate,
+        targetFollows.has(candidate.id),
+        (socialFollows.get(candidate.id) || new Set()).has(targetId)
+      )
+    )
+    .map((candidate) => toProfileSummary(candidate))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const messagesSource =
+    viewerId === targetId
+      ? socialMessages.filter((message) => message.fromId === targetId || message.toId === targetId)
+      : socialMessages.filter(
+          (message) =>
+            (message.fromId === viewerId && message.toId === targetId) ||
+            (message.fromId === targetId && message.toId === viewerId)
+        );
+
+  const messages = messagesSource
+    .slice()
+    .sort((a, b) => b.sentAt - a.sentAt)
+    .slice(0, 80)
+    .map((message) => {
+      const withUserId = message.fromId === targetId ? message.toId : message.fromId;
+      const withProfile = socialProfiles.get(withUserId);
+      return {
+        ...message,
+        withUser: withProfile ? toProfileSummary(withProfile) : null,
+      };
+    });
+
+  return res.json({ profile, posts, matches, messages });
 });
 
 app.post('/api/social/photo-posts', requireAuth, async (req, res) => {

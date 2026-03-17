@@ -446,6 +446,10 @@
   background-position: 100% 50%;
 }
 
+.feed-screen .tab-row .tab-btn:nth-child(7) {
+  background-position: 10% 50%;
+}
+
 .feed-screen .tab-row .tab-btn-active {
   color: #ffffff;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5) inset;
@@ -724,6 +728,15 @@
   width: 42px;
   height: 42px;
   border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.profile-post-thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
   object-fit: cover;
   border: 1px solid var(--border-subtle);
   flex-shrink: 0;

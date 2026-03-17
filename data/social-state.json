@@ -1,8 +1,17 @@
 {
   "version": 1,
-  "savedAt": 1773772438102,
+  "savedAt": 1773776350539,
   "likesByUser": {
     "user_mmu2y4o0": [
+      {
+        "id": "1554947387",
+        "title": "Gym Playlist",
+        "artist": "Addison Zegan",
+        "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/2b/66/47/2b664769-bf47-2199-8ad0-d1bcd3ded310/mzaf_12416389823732582057.plus.aac.p.m4a",
+        "album": "Gym Playlist - Single",
+        "artworkUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music114/v4/5e/25/00/5e2500ec-0314-02cc-867c-edfeb581630e/859734606985.jpg/600x600bb.jpg",
+        "genre": "Spoken Word"
+      },
       {
         "id": "1440847742",
         "title": "Head Over Boots",
@@ -22,14 +31,6 @@
         "genre": "Alternative"
       }
     ],
-    "you": [
-      {
-        "id": "999001",
-        "title": "Persist Song",
-        "artist": "Persist Artist",
-        "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/06/56/ce/0656ce15-6cb0-13be-53e4-4f3c0f34b9af/mzaf_14291669274710217469.plus.aac.p.m4a"
-      }
-    ],
     "user_mmuyayzr": [
       {
         "id": "1593324865",
@@ -43,27 +44,16 @@
     ]
   },
   "followsByUser": {
-    "you": [],
-    "user_mmu2y4o0": [],
-    "user_mmuyayzr": []
+    "user_mmu2y4o0": [
+      "user_mmuyayzr"
+    ],
+    "user_mmuyayzr": [
+      "user_mmu2y4o0"
+    ]
   },
   "messages": [],
   "photoPosts": [],
   "surveysByUser": {
-    "you": {
-      "seeds": [
-        {
-          "id": "fix1",
-          "title": "Fix",
-          "artist": "Agent",
-          "genre": "pop"
-        }
-      ],
-      "moods": [
-        "chill"
-      ],
-      "savedAt": 1773719912317
-    },
     "user_mmu2y4o0": {
       "seeds": [],
       "moods": [

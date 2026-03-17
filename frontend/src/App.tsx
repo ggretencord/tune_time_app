@@ -99,6 +99,24 @@ type PhotoPost = {
   } | null
 }
 
+type ProfileSummary = {
+  id: string
+  name: string
+  handle: string
+  profileImageUrl: string
+}
+
+type ProfileMessage = ChatMessage & {
+  withUser: ProfileSummary | null
+}
+
+type SocialProfileDetails = {
+  profile: SocialUser
+  posts: PhotoPost[]
+  matches: ProfileSummary[]
+  messages: ProfileMessage[]
+}
+
 type PhotoFilterPreset = 'none' | 'vivid' | 'noir' | 'vintage' | 'cool' | 'dreamy'
 type PhotoOverlayPreset = 'none' | 'sunset' | 'ocean' | 'midnight' | 'rose'
 
@@ -466,6 +484,7 @@ type AccountScreenProps = {
 function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
   const [mode, setMode] = useState<'create' | 'signin'>('create')
   const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
   const [handle, setHandle] = useState('')
   const [bio, setBio] = useState('')
   const [birthday, setBirthday] = useState('')
@@ -503,8 +522,13 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
   async function handleCreateAccount(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
-    if (!name.trim() || !handle.trim() || !birthday || !gender || !password) {
-      setError('Name, handle, birthday, gender, and password are required.')
+    if (!name.trim() || !email.trim() || !handle.trim() || !birthday || !gender || !password) {
+      setError('Name, email, handle, birthday, gender, and password are required.')
+      return
+    }
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailPattern.test(email.trim())) {
+      setError('Enter a valid email address.')
       return
     }
     if (!profilePhotoData) {
@@ -526,6 +550,7 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: name.trim(),
+          email: email.trim(),
           handle: handle.trim(),
           bio: bio.trim(),
           birthday,
@@ -617,7 +642,8 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
           <>
             <h1 className="title">Create your account</h1>
             <p className="subtitle">
-              Birthday, gender, and profile photo are required. You can change your photo any time.
+              Email, birthday, gender, and profile photo are required. You can change your photo any
+              time.
             </p>
             <form className="account-form" onSubmit={handleCreateAccount}>
               <label className="field-label">
@@ -626,6 +652,16 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
                   className="search-input field-input"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
+                />
+              </label>
+              <label className="field-label">
+                Email
+                <input
+                  className="search-input field-input"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  type="email"
+                  placeholder="you@example.com"
                 />
               </label>
               <label className="field-label">
@@ -939,7 +975,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<
-    'discover' | 'liked' | 'dating' | 'photos' | 'community' | 'messages'
+    'discover' | 'liked' | 'dating' | 'photos' | 'community' | 'messages' | 'profiles'
   >('discover')
   const [activeIndex, setActiveIndex] = useState(0)
   const [likedSongs, setLikedSongs] = useState<Track[]>(() => viewer.likedMusic || [])
@@ -995,6 +1031,10 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
   const [photoDragX, setPhotoDragX] = useState(0)
   const [updatingProfilePhoto, setUpdatingProfilePhoto] = useState(false)
   const [socialUsers, setSocialUsers] = useState<SocialUser[]>([])
+  const [profileUserId, setProfileUserId] = useState(viewer.id)
+  const [profileDetails, setProfileDetails] = useState<SocialProfileDetails | null>(null)
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [profileError, setProfileError] = useState<string | null>(null)
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
   const [chatInput, setChatInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -1020,6 +1060,58 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
 
   const currentTrack = items.length ? items[activeIndex % items.length] : null
   const selectedUser = socialUsers.find((u) => u.id === selectedUserId) || null
+  const profileDirectory = useMemo<ProfileSummary[]>(
+    () => [
+      {
+        id: viewer.id,
+        name: viewer.name,
+        handle: viewer.handle,
+        profileImageUrl: viewer.profileImageUrl,
+      },
+      ...socialUsers.map((user) => ({
+        id: user.id,
+        name: user.name,
+        handle: user.handle,
+        profileImageUrl: user.profileImageUrl,
+      })),
+    ],
+    [socialUsers, viewer.handle, viewer.id, viewer.name, viewer.profileImageUrl],
+  )
+  const isGigiProfile = viewer.handle.trim().toLowerCase() === 'gigi_1777'
+  const allUsersForGigi = useMemo(
+    () => [
+      {
+        id: viewer.id,
+        name: viewer.name,
+        handle: viewer.handle,
+        bio: viewer.bio,
+        age: viewer.age,
+        gender: viewer.gender,
+        matchOpen: viewer.matchOpen,
+        profileImageUrl: viewer.profileImageUrl,
+        likedSongsCount: viewer.likedMusic.length,
+        isFollowing: null as boolean | null,
+        followsYou: null as boolean | null,
+        isMatched: null as boolean | null,
+      },
+      ...socialUsers.map((user) => ({
+        id: user.id,
+        name: user.name,
+        handle: user.handle,
+        bio: user.bio,
+        age: user.age,
+        gender: user.gender,
+        matchOpen: user.matchOpen,
+        profileImageUrl: user.profileImageUrl,
+        likedSongsCount: user.likedMusic.length,
+        isFollowing: user.isFollowing,
+        followsYou: user.followsYou,
+        isMatched: user.isMatched,
+      })),
+    ],
+    [socialUsers, viewer],
+  )
+  const activeProfileUser = profileDirectory.find((user) => user.id === profileUserId) || profileDirectory[0] || null
   const canMessageSelectedUser = Boolean(viewer.matchOpen && selectedUser?.isMatched)
   const songShareHint = !selectedUser
     ? 'Pick someone in Community to choose who gets your shared songs.'
@@ -1538,6 +1630,56 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
 
     loadMessages()
   }, [selectedUserId, sessionToken])
+
+  useEffect(() => {
+    if (!profileDirectory.some((user) => user.id === profileUserId)) {
+      setProfileUserId(viewer.id)
+    }
+  }, [profileDirectory, profileUserId, viewer.id])
+
+  useEffect(() => {
+    if (tab !== 'profiles') return
+    const targetId = activeProfileUser?.id || viewer.id
+    let cancelled = false
+
+    async function loadProfileDetails() {
+      setProfileLoading(true)
+      setProfileError(null)
+      try {
+        const res = await fetch(`${API_BASE}/api/social/profiles/${encodeURIComponent(targetId)}`, {
+          headers: authHeaders(sessionToken),
+        })
+        const data = await parseResponseJsonSafe<{
+          profile?: SocialUser
+          posts?: PhotoPost[]
+          matches?: ProfileSummary[]
+          messages?: ProfileMessage[]
+        }>(res)
+        if (!res.ok || !data?.profile) {
+          throw new Error(await readApiErrorMessage(res, 'Could not load that profile right now.'))
+        }
+        if (cancelled) return
+        setProfileDetails({
+          profile: data.profile,
+          posts: Array.isArray(data.posts) ? data.posts : [],
+          matches: Array.isArray(data.matches) ? data.matches : [],
+          messages: Array.isArray(data.messages) ? data.messages : [],
+        })
+      } catch (err) {
+        if (cancelled) return
+        const message = err instanceof Error ? err.message : 'Could not load that profile right now.'
+        setProfileError(message)
+        setProfileDetails(null)
+      } finally {
+        if (!cancelled) setProfileLoading(false)
+      }
+    }
+
+    loadProfileDetails()
+    return () => {
+      cancelled = true
+    }
+  }, [activeProfileUser?.id, sessionToken, tab, viewer.id])
 
   useEffect(() => {
     let cancelled = false
@@ -2148,6 +2290,13 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
           onClick={() => setTab('community')}
         >
           Community{likedYouUsers.length > 0 ? ` (${likedYouUsers.length})` : newMatchAlerts > 0 ? ` (${newMatchAlerts})` : ''}
+        </button>
+        <button
+          className={`tab-btn ${tab === 'profiles' ? 'tab-btn-active' : ''}`}
+          type="button"
+          onClick={() => setTab('profiles')}
+        >
+          Profiles
         </button>
         <button
           className={`tab-btn ${tab === 'messages' ? 'tab-btn-active' : ''}`}
@@ -3125,6 +3274,160 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
               </section>
             </>
           )}
+        </main>
+      )}
+
+      {tab === 'profiles' && (
+        <main className="community-main">
+          {profileError && <p className="error-text">{profileError}</p>}
+          <section className="community-users">
+            <h2 className="panel-title">User profiles</h2>
+            <p className="song-artist messages-intro">
+              Open any profile to see posts, matches, and messages.
+            </p>
+            <div className="list">
+              {profileDirectory.map((user) => (
+                <button
+                  key={`profile-picker-${user.id}`}
+                  className={`user-row ${activeProfileUser?.id === user.id ? 'user-row-active' : ''}`}
+                  type="button"
+                  onClick={() => setProfileUserId(user.id)}
+                >
+                  <img src={user.profileImageUrl} alt="" className="avatar-thumb" />
+                  <div className="result-meta">
+                    <span className="song-title">
+                      {user.name} <span className="user-handle">@{user.handle}</span>
+                    </span>
+                    <span className="song-artist">{user.id === viewer.id ? 'You' : 'Open profile'}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {isGigiProfile && (
+            <section className="community-users">
+              <h3 className="section-title">All users info (without password/birthday)</h3>
+              <div className="list">
+                {allUsersForGigi.map((user) => (
+                  <article key={`gigi-user-info-${user.id}`} className="list-row">
+                    <img src={user.profileImageUrl} alt="" className="avatar-thumb" />
+                    <div className="result-meta">
+                      <span className="song-title">
+                        {user.name} <span className="user-handle">@{user.handle}</span>
+                      </span>
+                      <span className="song-artist">
+                        ID: {user.id} · Age: {user.age ?? 'Unknown'} · Gender: {user.gender}
+                      </span>
+                      <span className="song-artist">
+                        Match mode: {user.matchOpen ? 'Open' : 'Closed'} · Likes: {user.likedSongsCount}
+                      </span>
+                      <span className="song-artist">{user.bio || 'No bio yet.'}</span>
+                      {user.isFollowing !== null && (
+                        <span className="song-artist">
+                          Following: {user.isFollowing ? 'Yes' : 'No'} · Follows you:{' '}
+                          {user.followsYou ? 'Yes' : 'No'} · Matched: {user.isMatched ? 'Yes' : 'No'}
+                        </span>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {profileLoading ? (
+            <p className="empty-text">Loading profile...</p>
+          ) : profileDetails ? (
+            <>
+              <section className="selected-user-card">
+                <img src={profileDetails.profile.profileImageUrl} alt="" className="avatar-thumb" />
+                <div>
+                  <h3>{profileDetails.profile.name}</h3>
+                  <p className="song-artist">@{profileDetails.profile.handle}</p>
+                  <p className="song-artist">{profileDetails.profile.bio || 'No bio yet.'}</p>
+                  <p className="song-artist">
+                    Match mode: {profileDetails.profile.matchOpen ? 'Open' : 'Closed'}
+                    {profileDetails.profile.isMatched ? ' · Matched with you' : ''}
+                  </p>
+                </div>
+              </section>
+
+              <section className="community-users">
+                <h3 className="section-title">Posts</h3>
+                {profileDetails.posts.length === 0 ? (
+                  <p className="empty-text">No posts to show yet.</p>
+                ) : (
+                  <div className="list">
+                    {profileDetails.posts.map((post) => (
+                      <article key={`profile-post-${post.id}`} className="list-row">
+                        <img src={post.imageUrl} alt="" className="profile-post-thumb" />
+                        <div className="result-meta">
+                          <span className="song-title">{post.caption || 'Photo post'}</span>
+                          <span className="song-artist">
+                            {new Date(post.createdAt).toLocaleString()}
+                            {post.clip ? ` · Clip: ${post.clip.title} - ${post.clip.artist}` : ''}
+                          </span>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="community-users">
+                <h3 className="section-title">Matches</h3>
+                {profileDetails.matches.length === 0 ? (
+                  <p className="empty-text">No matches yet.</p>
+                ) : (
+                  <div className="list">
+                    {profileDetails.matches.map((matchUser) => (
+                      <button
+                        key={`profile-match-${matchUser.id}`}
+                        className="user-row"
+                        type="button"
+                        onClick={() => setProfileUserId(matchUser.id)}
+                      >
+                        <img src={matchUser.profileImageUrl} alt="" className="avatar-thumb" />
+                        <div className="result-meta">
+                          <span className="song-title">
+                            {matchUser.name} <span className="user-handle">@{matchUser.handle}</span>
+                          </span>
+                          <span className="song-artist">View profile</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="community-chat">
+                <h3 className="section-title">Messages</h3>
+                {profileDetails.messages.length === 0 ? (
+                  <p className="empty-text">No messages yet.</p>
+                ) : (
+                  <div className="chat-box">
+                    {profileDetails.messages.map((message) => (
+                      <div
+                        key={`profile-msg-${message.id}`}
+                        className={`chat-bubble ${message.fromId === viewer.id ? 'chat-me' : 'chat-them'}`}
+                      >
+                        <span>
+                          {message.withUser ? `With ${message.withUser.name}: ` : ''}
+                          {message.text}
+                        </span>
+                        {message.sharedTrack && (
+                          <span className="song-artist">
+                            Shared: {message.sharedTrack.title} - {message.sharedTrack.artist}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </>
+          ) : null}
         </main>
       )}
 
