@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "savedAt": 1773776350539,
+  "savedAt": 1773788178141,
   "likesByUser": {
     "user_mmu2y4o0": [
       {
@@ -41,7 +41,8 @@
         "artworkUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/45/a4/59/45a4593f-3d41-b6f4-6cd1-0105040bbff5/21UM1IM37945.rgb.jpg/600x600bb.jpg",
         "genre": "Dance"
       }
-    ]
+    ],
+    "user_mmv7nffy": []
   },
   "followsByUser": {
     "user_mmu2y4o0": [
@@ -49,6 +50,10 @@
     ],
     "user_mmuyayzr": [
       "user_mmu2y4o0"
+    ],
+    "user_mmv7nffy": [
+      "user_mmu2y4o0",
+      "user_mmuyayzr"
     ]
   },
   "messages": [],
@@ -67,6 +72,13 @@
         "romantic"
       ],
       "savedAt": 1773772432680
+    },
+    "user_mmv7nffy": {
+      "seeds": [],
+      "moods": [
+        "party"
+      ],
+      "savedAt": 1773788137322
     }
   }
 }
