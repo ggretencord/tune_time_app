@@ -155,7 +155,10 @@ const PHOTO_OVERLAY_PRESETS: Array<{
 
 const PHOTO_CLIP_PREVIEW_SECONDS = 30
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+const PRODUCTION_API_BASE_URL = 'https://backend-production-90ab.up.railway.app'
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? PRODUCTION_API_BASE_URL : '')
+).replace(/\/$/, '')
 const SESSION_STORAGE_KEY = 'tune_time_session_token'
 const DATING_MOOD_OPTIONS = ['chill', 'hype', 'sad', 'focus', 'party', 'romantic'] as const
 const DATING_GENDER_OPTIONS: DatingGenderOption[] = ['male', 'female', 'would rather not say']
