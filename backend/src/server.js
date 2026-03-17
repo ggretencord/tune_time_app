@@ -23,7 +23,7 @@ const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
 const SOCIAL_STATE_FILE = path.join(DATA_DIR, 'social-state.json');
 const LEGACY_ACCOUNTS_FILE = path.join(LEGACY_DATA_DIR, 'accounts.json');
 const LEGACY_SOCIAL_STATE_FILE = path.join(LEGACY_DATA_DIR, 'social-state.json');
-const SEEDED_PROFILE_IDS = new Set(['you', 'ava', 'milo', 'jules']);
+const SEEDED_PROFILE_IDS = new Set();
 let accountPersistQueue = Promise.resolve();
 let socialStatePersistQueue = Promise.resolve();
 
@@ -44,72 +44,10 @@ const latestSurveyByUser = new Map();
 let socialMessages = [];
 let socialPhotoPosts = [];
 
-const socialProfiles = new Map([
-  [
-    'you',
-    {
-      id: 'you',
-      name: 'You',
-      handle: 'you',
-      bio: 'Building the perfect soundtrack.',
-      birthday: '1999-06-15',
-      gender: 'would rather not say',
-      matchOpen: true,
-      profileImageUrl:
-        'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=800&q=80',
-    },
-  ],
-  [
-    'ava',
-    {
-      id: 'ava',
-      name: 'Ava Rivera',
-      handle: 'ava_r',
-      bio: 'Indie nights and dreamy vocals.',
-      birthday: '1998-02-03',
-      gender: 'female',
-      matchOpen: true,
-      profileImageUrl:
-        'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=800&q=80',
-    },
-  ],
-  [
-    'milo',
-    {
-      id: 'milo',
-      name: 'Milo Grant',
-      handle: 'milo_g',
-      bio: 'Hip-hop edits and gym energy.',
-      birthday: '1996-10-28',
-      gender: 'male',
-      matchOpen: false,
-      profileImageUrl:
-        'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=800&q=80',
-    },
-  ],
-  [
-    'jules',
-    {
-      id: 'jules',
-      name: 'Jules Tan',
-      handle: 'jules_mix',
-      bio: 'House, disco, and late-night drives.',
-      birthday: '2001-01-11',
-      gender: 'would rather not say',
-      matchOpen: true,
-      profileImageUrl:
-        'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80',
-    },
-  ],
-]);
+const socialProfiles = new Map();
 
 const socialLikes = new Map();
-const socialFollows = new Map([
-  ['you', new Set(['ava'])],
-  ['ava', new Set()],
-  ['milo', new Set()],
-  ['jules', new Set()],
-]);
+const socialFollows = new Map();
 const sessions = new Map();
 const ALLOWED_GENDERS = new Set(['male', 'female', 'would rather not say']);
 
@@ -1120,49 +1058,8 @@ app.get('/api/feed', requireAuth, async (req, res) => {
 });
 
 async function seedSocialLikes() {
-  const [avaLikes, miloLikes, julesLikes] = await Promise.all([
-    searchTracks('phoebe bridgers', 4),
-    searchTracks('drake', 4),
-    searchTracks('house music', 4),
-  ]);
-  socialLikes.set('ava', avaLikes);
-  socialLikes.set('milo', miloLikes);
-  socialLikes.set('jules', julesLikes);
-  socialLikes.set('you', []);
-  socialMessages = [
-    {
-      id: 'msg-1',
-      fromId: 'ava',
-      toId: 'you',
-      text: 'Your liked music list is so good. Any recs?',
-      sentAt: Date.now() - 1000 * 60 * 60 * 3,
-    },
-    {
-      id: 'msg-2',
-      fromId: 'you',
-      toId: 'ava',
-      text: 'Try the latest Japanese Breakfast track.',
-      sentAt: Date.now() - 1000 * 60 * 60 * 2,
-    },
-  ];
-  socialPhotoPosts = [
-    {
-      id: 'photo-seed-ava',
-      authorId: 'ava',
-      imageUrl:
-        'https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?auto=format&fit=crop&w=900&q=80',
-      caption: 'Late-night record store run.',
-      createdAt: Date.now() - 1000 * 60 * 50,
-    },
-    {
-      id: 'photo-seed-jules',
-      authorId: 'jules',
-      imageUrl:
-        'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=900&q=80',
-      caption: 'Pre-set playlist locked in.',
-      createdAt: Date.now() - 1000 * 60 * 20,
-    },
-  ];
+  socialMessages = [];
+  socialPhotoPosts = [];
 }
 
 // Social graph and messaging endpoints

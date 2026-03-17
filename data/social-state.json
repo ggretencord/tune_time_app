@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "savedAt": 1773720978956,
+  "savedAt": 1773772438102,
   "likesByUser": {
     "user_mmu2y4o0": [
       {
@@ -22,121 +22,6 @@
         "genre": "Alternative"
       }
     ],
-    "user_mmu36i3v": [],
-    "ava": [
-      {
-        "id": "1256607810",
-        "title": "Motion Sickness",
-        "artist": "Phoebe Bridgers",
-        "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/88/0d/3c/880d3c6d-70f6-4628-a1dc-5b07ef90421c/mzaf_7359776133976251843.plus.aac.p.m4a",
-        "album": "Stranger in the Alps",
-        "artworkUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/20/4c/6e/204c6ef3-8e95-4cee-2256-202ca62aebed/60220.jpg/600x600bb.jpg",
-        "genre": "Alternative"
-      },
-      {
-        "id": "1504700020",
-        "title": "I Know the End",
-        "artist": "Phoebe Bridgers",
-        "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview125/v4/e1/07/a5/e107a534-9d19-c459-e246-39efe3156918/mzaf_9734585710949644021.plus.aac.p.m4a",
-        "album": "Punisher",
-        "artworkUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/39/91/4f/39914f60-e9aa-4ae9-3962-44b0a5e5d570/656605150062.jpg/600x600bb.jpg",
-        "genre": "Alternative"
-      },
-      {
-        "id": "1697989328",
-        "title": "Waiting Room",
-        "artist": "Phoebe Bridgers",
-        "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview116/v4/21/80/8e/21808e33-a2dc-7c92-fdb6-8fe727059fc8/mzaf_15538727171556356780.plus.aac.p.m4a",
-        "album": "Lost Ark Studio Compilation, Vol. 8",
-        "artworkUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/68/22/26/68222693-dd98-1eae-8862-badf12368162/888295196574_cover.jpg/600x600bb.jpg",
-        "genre": "Alternative"
-      },
-      {
-        "id": "1256607811",
-        "title": "Funeral",
-        "artist": "Phoebe Bridgers",
-        "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/51/3a/5c/513a5c65-ba6c-4cfa-976a-10244a783dbe/mzaf_5564054319135700775.plus.aac.p.m4a",
-        "album": "Stranger in the Alps",
-        "artworkUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/20/4c/6e/204c6ef3-8e95-4cee-2256-202ca62aebed/60220.jpg/600x600bb.jpg",
-        "genre": "Alternative"
-      }
-    ],
-    "milo": [
-      {
-        "id": "1440829630",
-        "title": "Hold On, We're Going Home (feat. Majid Jordan)",
-        "artist": "Drake",
-        "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/e1/9b/b6/e19bb624-9cd8-021b-f771-e51629057774/mzaf_13878644440815306616.plus.aac.p.m4a",
-        "album": "Nothing Was the Same (Deluxe)",
-        "artworkUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/51/61/f3/5161f3c4-2292-f035-eb68-6f95bbc9edd6/00602537542338.rgb.jpg/600x600bb.jpg",
-        "genre": "Hip-Hop/Rap"
-      },
-      {
-        "id": "1662168786",
-        "title": "MIA (feat. Drake)",
-        "artist": "Bad Bunny",
-        "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/50/eb/25/50eb2545-e400-fb43-6ff7-101f9bd429f2/mzaf_7089771968275109381.plus.aac.p.m4a",
-        "album": "MIA (feat. Drake) - Single",
-        "artworkUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music123/v4/09/aa/f8/09aaf8da-8eaf-bf60-0c23-48a88d546cbd/26991.jpg/600x600bb.jpg",
-        "genre": "Latin"
-      },
-      {
-        "id": "1440841384",
-        "title": "One Dance (feat. Wizkid & Kyla)",
-        "artist": "Drake",
-        "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview116/v4/a8/bd/68/a8bd68a2-dcd2-9024-3859-3a9fd6d53576/mzaf_16864609147187531487.plus.aac.p.m4a",
-        "album": "Views",
-        "artworkUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/f2/0d/8b/f20d8bff-a927-ae98-6784-20a1f51cb23e/16UMGIM27642.rgb.jpg/600x600bb.jpg",
-        "genre": "Hip-Hop/Rap"
-      },
-      {
-        "id": "1440843496",
-        "title": "One Dance (feat. Wizkid & Kyla)",
-        "artist": "Drake",
-        "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/9f/ce/31/9fce31a8-2363-2ed1-8aba-02532737f55a/mzaf_5942699190158325867.plus.aac.p.m4a",
-        "album": "Views",
-        "artworkUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/95/f5/87/95f587f7-21c3-d5f9-d81a-4350f9caa020/16UMGIM27643.rgb.jpg/600x600bb.jpg",
-        "genre": "Hip-Hop/Rap"
-      }
-    ],
-    "jules": [
-      {
-        "id": "1711665785",
-        "title": "House Music",
-        "artist": "Benny Benassi",
-        "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview116/v4/81/1a/07/811a0786-e0e2-f609-4ab2-ce5b54f11cca/mzaf_5861564895463830913.plus.aac.p.m4a",
-        "album": "House Music - Single",
-        "artworkUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music116/v4/ce/32/8c/ce328c71-4088-fa22-bed6-cf1622091205/617465265853.jpg/600x600bb.jpg",
-        "genre": "Dance"
-      },
-      {
-        "id": "1711708459",
-        "title": "House Music (feat. Arctic Lake) [Edit]",
-        "artist": "Boris Brejcha",
-        "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview116/v4/73/54/1a/73541ae6-7a0a-4179-0e6e-0ffd129fb284/mzaf_13373799648190413040.plus.aac.p.m4a",
-        "album": "House Music (Edit) [feat. Arctic Lake] - Single",
-        "artworkUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/4d/5c/94/4d5c94b2-a199-3280-6d43-43612f518c10/617465028625.jpg/600x600bb.jpg",
-        "genre": "Dance"
-      },
-      {
-        "id": "1802551096",
-        "title": "House Music",
-        "artist": "Masiwei",
-        "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/56/23/18/56231873-6a8d-e502-9f24-b3076b748d84/mzaf_1081161876049046869.plus.aac.p.m4a",
-        "album": "The Lottery",
-        "artworkUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/40/cd/9c/40cd9c6d-141d-7442-0538-913f314a9ca8/193017170245.jpg/600x600bb.jpg",
-        "genre": "Chinese Hip-Hop"
-      },
-      {
-        "id": "1474080024",
-        "title": "House Music",
-        "artist": "HUGEL",
-        "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/83/48/dc/8348dc9c-d0a1-0886-5e5a-b8cbe40f357b/mzaf_1678866927642311112.plus.aac.p.m4a",
-        "album": "House Music - Single",
-        "artworkUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/ef/54/e6/ef54e615-28a3-0c1a-2396-9da5a666fd6a/190295383749.jpg/600x600bb.jpg",
-        "genre": "Dance"
-      }
-    ],
     "you": [
       {
         "id": "999001",
@@ -145,92 +30,25 @@
         "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/06/56/ce/0656ce15-6cb0-13be-53e4-4f3c0f34b9af/mzaf_14291669274710217469.plus.aac.p.m4a"
       }
     ],
-    "user_mmu391wc": [],
-    "user_mmu39ef3": [],
-    "user_mmu3mr6y": [
+    "user_mmuyayzr": [
       {
-        "id": "1446019275",
-        "title": "Lonely",
-        "artist": "Akon",
-        "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/df/a7/af/dfa7af6d-1f53-c553-cdda-2044fff3fb3f/mzaf_11442724743146894220.plus.aac.p.m4a",
-        "album": "Trouble (Deluxe Edition)",
-        "artworkUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music112/v4/05/cd/f8/05cdf871-c9a7-e29c-d00b-3214173806d4/14UMGIM28691.rgb.jpg/600x600bb.jpg",
-        "genre": "R&B/Soul"
+        "id": "1593324865",
+        "title": "Romantic (NOTD Remix)",
+        "artist": "Stanaj",
+        "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/c4/b7/0f/c4b70fd2-ae9b-0d54-47b4-540612fa4396/mzaf_2839357287246955129.plus.aac.p.m4a",
+        "album": "Spring Chill",
+        "artworkUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/45/a4/59/45a4593f-3d41-b6f4-6cd1-0105040bbff5/21UM1IM37945.rgb.jpg/600x600bb.jpg",
+        "genre": "Dance"
       }
     ]
   },
   "followsByUser": {
-    "you": [
-      "ava"
-    ],
-    "ava": [
-      "you"
-    ],
-    "milo": [],
-    "jules": [],
-    "user_mmu2y4o0": [
-      "user_mmu36i3v",
-      "user_mmu3mr6y"
-    ],
-    "user_mmu36i3v": [
-      "user_mmu3mr6y",
-      "user_mmu2y4o0"
-    ],
-    "user_mmu391wc": [],
-    "user_mmu39ef3": [],
-    "user_mmu3mr6y": [
-      "user_mmu2y4o0",
-      "user_mmu36i3v"
-    ]
+    "you": [],
+    "user_mmu2y4o0": [],
+    "user_mmuyayzr": []
   },
-  "messages": [
-    {
-      "id": "msg-1",
-      "fromId": "ava",
-      "toId": "you",
-      "text": "Your liked music list is so good. Any recs?",
-      "sentAt": 1773595724126
-    },
-    {
-      "id": "msg-2",
-      "fromId": "you",
-      "toId": "ava",
-      "text": "Try the latest Japanese Breakfast track.",
-      "sentAt": 1773599324126
-    },
-    {
-      "id": "msg-1773719537901-y7ch8q",
-      "fromId": "you",
-      "toId": "ava",
-      "text": "persist check",
-      "sentAt": 1773719537901
-    },
-    {
-      "id": "msg-1773719623222-vjj54f",
-      "fromId": "you",
-      "toId": "ava",
-      "text": "persist check 2",
-      "sentAt": 1773719623222
-    }
-  ],
-  "photoPosts": [
-    {
-      "id": "photo-seed-ava",
-      "authorId": "ava",
-      "imageUrl": "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?auto=format&fit=crop&w=900&q=80",
-      "caption": "Late-night record store run.",
-      "clip": null,
-      "createdAt": 1773603524126
-    },
-    {
-      "id": "photo-seed-jules",
-      "authorId": "jules",
-      "imageUrl": "https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=900&q=80",
-      "caption": "Pre-set playlist locked in.",
-      "clip": null,
-      "createdAt": 1773605324126
-    }
-  ],
+  "messages": [],
+  "photoPosts": [],
   "surveysByUser": {
     "you": {
       "seeds": [
@@ -253,47 +71,12 @@
       ],
       "savedAt": 1773719946617
     },
-    "user_mmu391wc": {
-      "seeds": [
-        {
-          "id": "abc1",
-          "title": "abc",
-          "artist": "artist",
-          "genre": "pop"
-        }
-      ],
-      "moods": [
-        "chill"
-      ],
-      "savedAt": 1773720268086
-    },
-    "user_mmu39ef3": {
-      "seeds": [
-        {
-          "id": "abc1",
-          "title": "abc",
-          "artist": "artist",
-          "genre": "pop"
-        }
-      ],
-      "moods": [
-        "chill"
-      ],
-      "savedAt": 1773720284316
-    },
-    "user_mmu36i3v": {
+    "user_mmuyayzr": {
       "seeds": [],
       "moods": [
         "romantic"
       ],
-      "savedAt": 1773720777573
-    },
-    "user_mmu3mr6y": {
-      "seeds": [],
-      "moods": [
-        "sad"
-      ],
-      "savedAt": 1773720913359
+      "savedAt": 1773772432680
     }
   }
 }

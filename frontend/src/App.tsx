@@ -1051,6 +1051,17 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
         }),
     [socialUsers],
   )
+  const likedYouUsers = useMemo(
+    () =>
+      socialUsers
+        .filter((user) => user.followsYou)
+        .sort((a, b) => {
+          if (a.isMatched !== b.isMatched) return a.isMatched ? -1 : 1
+          if (a.isFollowing !== b.isFollowing) return a.isFollowing ? -1 : 1
+          return a.name.localeCompare(b.name)
+        }),
+    [socialUsers],
+  )
   const remainingDatingCandidates = useMemo(
     () =>
       datingCandidates.filter(
@@ -2136,7 +2147,7 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
           type="button"
           onClick={() => setTab('community')}
         >
-          Community{newMatchAlerts > 0 ? ` (${newMatchAlerts})` : ''}
+          Community{likedYouUsers.length > 0 ? ` (${likedYouUsers.length})` : newMatchAlerts > 0 ? ` (${newMatchAlerts})` : ''}
         </button>
         <button
           className={`tab-btn ${tab === 'messages' ? 'tab-btn-active' : ''}`}
@@ -2912,6 +2923,45 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
               accept="image/png,image/jpeg,image/webp"
               onChange={handleProfilePhotoUpdate}
             />
+          </section>
+          <section className="community-users">
+            <h2 className="panel-title">Liked your profile</h2>
+            {likedYouUsers.length === 0 ? (
+              <p className="empty-text">No profile likes yet. Keep swiping and updating your music vibe.</p>
+            ) : (
+              <div className="list">
+                {likedYouUsers.map((user) => (
+                  <article key={`liked-you-${user.id}`} className="list-row">
+                    <img src={user.profileImageUrl} alt="" className="avatar-thumb" />
+                    <div className="result-meta">
+                      <span className="song-title">
+                        {user.name} <span className="user-handle">@{user.handle}</span>
+                      </span>
+                      <span className="song-artist">
+                        {user.isMatched ? 'Matched' : user.isFollowing ? 'You both liked each other' : 'Liked your profile'}
+                      </span>
+                    </div>
+                    <div className="list-row-actions">
+                      <button
+                        className="mini-btn list-row-action"
+                        type="button"
+                        onClick={() => setSelectedUserId(user.id)}
+                      >
+                        View
+                      </button>
+                      <button
+                        className={`mini-btn list-row-action ${user.isFollowing ? 'pass-btn' : 'like-btn'}`}
+                        type="button"
+                        onClick={() => handleFollowToggle(user)}
+                        disabled={!viewer.matchOpen}
+                      >
+                        {user.isFollowing ? 'Following' : 'Follow back'}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
           <section className="community-users">
             <h2 className="panel-title">People</h2>
