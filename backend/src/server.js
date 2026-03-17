@@ -1,16 +1,42 @@
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
+const fs = require('fs/promises');
+const path = require('path');
 const sharp = require('sharp');
 
 const app = express();
 const PORT = process.env.PORT || 4010;
+const CORS_ORIGINS = String(process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const PHOTO_CLIP_PREVIEW_SECONDS = 30;
 const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const DATA_DIR = process.env.DATA_DIR
+  ? path.resolve(String(process.env.DATA_DIR))
+  : path.join(__dirname, '..', '..', 'data');
+const LEGACY_DATA_DIR = path.join(__dirname, '..', 'data');
+const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
+const SOCIAL_STATE_FILE = path.join(DATA_DIR, 'social-state.json');
+const LEGACY_ACCOUNTS_FILE = path.join(LEGACY_DATA_DIR, 'accounts.json');
+const LEGACY_SOCIAL_STATE_FILE = path.join(LEGACY_DATA_DIR, 'social-state.json');
+const SEEDED_PROFILE_IDS = new Set(['you', 'ava', 'milo', 'jules']);
+let accountPersistQueue = Promise.resolve();
+let socialStatePersistQueue = Promise.resolve();
 
-app.use(cors());
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || CORS_ORIGINS.length === 0 || CORS_ORIGINS.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error('Not allowed by CORS'));
+    },
+  })
+);
 app.use(express.json({ limit: '8mb' }));
 
 // In-memory store for survey preferences, scoped per user.
@@ -140,6 +166,329 @@ function initializeSeedPasswords() {
       profile.passwordHash = hashPassword('password123');
     }
   }
+}
+
+function getPersistedProfilesPayload() {
+  return Array.from(socialProfiles.values())
+    .filter((profile) => !SEEDED_PROFILE_IDS.has(profile.id))
+    .map((profile) => ({
+      id: String(profile.id || ''),
+      name: String(profile.name || ''),
+      handle: String(profile.handle || ''),
+      bio: String(profile.bio || ''),
+      birthday: String(profile.birthday || ''),
+      gender: String(profile.gender || 'would rather not say').toLowerCase(),
+      matchOpen: profile.matchOpen !== false,
+      profileImageUrl: String(profile.profileImageUrl || ''),
+      passwordHash: String(profile.passwordHash || ''),
+    }))
+    .filter((profile) => profile.id && profile.handle && profile.passwordHash);
+}
+
+async function persistAccounts() {
+  const runWrite = async () => {
+    const payload = {
+      version: 1,
+      savedAt: Date.now(),
+      profiles: getPersistedProfilesPayload(),
+    };
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    const tempPath = `${ACCOUNTS_FILE}.tmp`;
+    await fs.writeFile(tempPath, JSON.stringify(payload, null, 2), 'utf8');
+    await fs.rename(tempPath, ACCOUNTS_FILE);
+  };
+  const queuedWrite = accountPersistQueue.then(runWrite, runWrite);
+  accountPersistQueue = queuedWrite.catch(() => {});
+  return queuedWrite;
+}
+
+async function loadPersistedAccounts() {
+  let raw;
+  try {
+    raw = await fs.readFile(ACCOUNTS_FILE, 'utf8');
+  } catch (err) {
+    if (!(err && err.code === 'ENOENT')) throw err;
+    try {
+      raw = await fs.readFile(LEGACY_ACCOUNTS_FILE, 'utf8');
+    } catch (legacyErr) {
+      if (legacyErr && legacyErr.code === 'ENOENT') return;
+      throw legacyErr;
+    }
+  }
+
+  if (!raw) return;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // eslint-disable-next-line no-console
+    console.warn('accounts.json is invalid JSON; skipping persisted accounts load');
+    return;
+  }
+
+  const persistedProfiles = Array.isArray(parsed?.profiles) ? parsed.profiles : [];
+  persistedProfiles.forEach((profile) => {
+    const id = String(profile?.id || '').trim();
+    if (!id || SEEDED_PROFILE_IDS.has(id)) return;
+    const handle = String(profile?.handle || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '');
+    const passwordHash = String(profile?.passwordHash || '');
+    if (!handle || !passwordHash.includes(':')) return;
+    socialProfiles.set(id, {
+      id,
+      name: String(profile?.name || id),
+      handle,
+      bio: String(profile?.bio || 'Music fan'),
+      birthday: String(profile?.birthday || '2000-01-01'),
+      gender: ALLOWED_GENDERS.has(String(profile?.gender || '').toLowerCase())
+        ? String(profile.gender).toLowerCase()
+        : 'would rather not say',
+      matchOpen: profile?.matchOpen !== false,
+      profileImageUrl: String(profile?.profileImageUrl || ''),
+      passwordHash,
+    });
+    ensureSocialUser(id);
+  });
+}
+
+function normalizeTrackPayload(track) {
+  if (!track || typeof track !== 'object') return null;
+  const id = String(track.id || '').trim();
+  const title = String(track.title || '').trim();
+  const artist = String(track.artist || '').trim();
+  if (!id || !title || !artist) return null;
+  const payload = {
+    id,
+    title: title.slice(0, 200),
+    artist: artist.slice(0, 180),
+    previewUrl: String(track.previewUrl || '').trim(),
+  };
+  const album = String(track.album || '').trim();
+  if (album) payload.album = album.slice(0, 180);
+  const artworkUrl = String(track.artworkUrl || '').trim();
+  if (artworkUrl) payload.artworkUrl = artworkUrl;
+  const genre = String(track.genre || '').trim();
+  if (genre) payload.genre = genre.slice(0, 120);
+  return payload;
+}
+
+function getPersistedSocialStatePayload() {
+  const likesByUser = {};
+  for (const [userId, likes] of socialLikes.entries()) {
+    likesByUser[userId] = Array.isArray(likes)
+      ? likes.map((track) => normalizeTrackPayload(track)).filter(Boolean).slice(0, 50)
+      : [];
+  }
+
+  const followsByUser = {};
+  for (const [userId, follows] of socialFollows.entries()) {
+    followsByUser[userId] = Array.from(follows || []).filter(
+      (targetId) => targetId && targetId !== userId && socialProfiles.has(targetId)
+    );
+  }
+
+  const messages = socialMessages
+    .map((message) => {
+      const fromId = String(message?.fromId || '').trim();
+      const toId = String(message?.toId || '').trim();
+      if (!fromId || !toId || !socialProfiles.has(fromId) || !socialProfiles.has(toId)) return null;
+      const sharedTrack = normalizeTrackPayload(message?.sharedTrack);
+      return {
+        id: String(message?.id || `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+        fromId,
+        toId,
+        text: String(message?.text || '').slice(0, 600),
+        ...(sharedTrack ? { sharedTrack } : {}),
+        sentAt: Number.isFinite(Number(message?.sentAt)) ? Number(message.sentAt) : Date.now(),
+      };
+    })
+    .filter(Boolean)
+    .slice(-400);
+
+  const photoPosts = socialPhotoPosts
+    .map((post) => {
+      const authorId = String(post?.authorId || '').trim();
+      if (!authorId || !socialProfiles.has(authorId)) return null;
+      return {
+        id: String(post?.id || `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+        authorId,
+        imageUrl: String(post?.imageUrl || ''),
+        caption: String(post?.caption || '').slice(0, 180),
+        clip: normalizePhotoPostClip(post?.clip),
+        createdAt: Number.isFinite(Number(post?.createdAt)) ? Number(post.createdAt) : Date.now(),
+      };
+    })
+    .filter((post) => post && post.imageUrl)
+    .slice(0, 400);
+
+  const surveysByUser = {};
+  for (const [userId, survey] of latestSurveyByUser.entries()) {
+    if (!socialProfiles.has(userId) || !survey) continue;
+    const seeds = Array.isArray(survey.seeds)
+      ? survey.seeds
+          .filter((seed) => seed && seed.id)
+          .map((seed) => ({
+            id: String(seed.id),
+            title: String(seed.title || ''),
+            artist: String(seed.artist || ''),
+            genre: String(seed.genre || ''),
+          }))
+          .slice(0, 25)
+      : [];
+    const moods = Array.isArray(survey.moods)
+      ? survey.moods.map((mood) => String(mood || '').trim()).filter(Boolean).slice(0, 12)
+      : [];
+    surveysByUser[userId] = {
+      seeds,
+      moods,
+      savedAt: Number.isFinite(Number(survey.savedAt)) ? Number(survey.savedAt) : Date.now(),
+    };
+  }
+
+  return {
+    version: 1,
+    savedAt: Date.now(),
+    likesByUser,
+    followsByUser,
+    messages,
+    photoPosts,
+    surveysByUser,
+  };
+}
+
+async function persistSocialState() {
+  const runWrite = async () => {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    const payload = getPersistedSocialStatePayload();
+    const tempPath = `${SOCIAL_STATE_FILE}.tmp`;
+    await fs.writeFile(tempPath, JSON.stringify(payload, null, 2), 'utf8');
+    await fs.rename(tempPath, SOCIAL_STATE_FILE);
+  };
+  const queuedWrite = socialStatePersistQueue.then(runWrite, runWrite);
+  socialStatePersistQueue = queuedWrite.catch(() => {});
+  return queuedWrite;
+}
+
+async function loadPersistedSocialState() {
+  let raw;
+  try {
+    raw = await fs.readFile(SOCIAL_STATE_FILE, 'utf8');
+  } catch (err) {
+    if (!(err && err.code === 'ENOENT')) throw err;
+    try {
+      raw = await fs.readFile(LEGACY_SOCIAL_STATE_FILE, 'utf8');
+    } catch (legacyErr) {
+      if (legacyErr && legacyErr.code === 'ENOENT') return;
+      throw legacyErr;
+    }
+  }
+
+  if (!raw) return;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // eslint-disable-next-line no-console
+    console.warn('social-state.json is invalid JSON; skipping social state load');
+    return;
+  }
+
+  const likesByUser =
+    parsed?.likesByUser && typeof parsed.likesByUser === 'object' ? parsed.likesByUser : {};
+  Object.entries(likesByUser).forEach(([userId, likes]) => {
+    if (!socialProfiles.has(userId)) return;
+    ensureSocialUser(userId);
+    const normalizedLikes = Array.isArray(likes)
+      ? likes.map((track) => normalizeTrackPayload(track)).filter(Boolean).slice(0, 50)
+      : [];
+    socialLikes.set(userId, normalizedLikes);
+  });
+
+  const followsByUser =
+    parsed?.followsByUser && typeof parsed.followsByUser === 'object' ? parsed.followsByUser : {};
+  Object.entries(followsByUser).forEach(([userId, targets]) => {
+    if (!socialProfiles.has(userId)) return;
+    ensureSocialUser(userId);
+    const normalizedTargets = new Set(
+      (Array.isArray(targets) ? targets : []).filter(
+        (targetId) =>
+          targetId &&
+          targetId !== userId &&
+          socialProfiles.has(String(targetId).trim()) &&
+          String(targetId).trim()
+      )
+    );
+    socialFollows.set(
+      userId,
+      new Set(Array.from(normalizedTargets).map((targetId) => String(targetId).trim()))
+    );
+  });
+
+  const messages = Array.isArray(parsed?.messages) ? parsed.messages : [];
+  socialMessages = messages
+    .map((message) => {
+      const fromId = String(message?.fromId || '').trim();
+      const toId = String(message?.toId || '').trim();
+      if (!fromId || !toId || !socialProfiles.has(fromId) || !socialProfiles.has(toId)) return null;
+      const sharedTrack = normalizeTrackPayload(message?.sharedTrack);
+      return {
+        id: String(message?.id || `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+        fromId,
+        toId,
+        text: String(message?.text || '').slice(0, 600),
+        ...(sharedTrack ? { sharedTrack } : {}),
+        sentAt: Number.isFinite(Number(message?.sentAt)) ? Number(message.sentAt) : Date.now(),
+      };
+    })
+    .filter(Boolean)
+    .slice(-400);
+
+  const photoPosts = Array.isArray(parsed?.photoPosts) ? parsed.photoPosts : [];
+  socialPhotoPosts = photoPosts
+    .map((post) => {
+      const authorId = String(post?.authorId || '').trim();
+      if (!authorId || !socialProfiles.has(authorId)) return null;
+      return {
+        id: String(post?.id || `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+        authorId,
+        imageUrl: String(post?.imageUrl || ''),
+        caption: String(post?.caption || '').slice(0, 180),
+        clip: normalizePhotoPostClip(post?.clip),
+        createdAt: Number.isFinite(Number(post?.createdAt)) ? Number(post.createdAt) : Date.now(),
+      };
+    })
+    .filter((post) => post && post.imageUrl)
+    .slice(0, 400);
+
+  const surveysByUser =
+    parsed?.surveysByUser && typeof parsed.surveysByUser === 'object' ? parsed.surveysByUser : {};
+  Object.entries(surveysByUser).forEach(([userId, survey]) => {
+    if (!socialProfiles.has(userId) || !survey || typeof survey !== 'object') return;
+    const seeds = Array.isArray(survey.seeds)
+      ? survey.seeds
+          .filter((seed) => seed && seed.id)
+          .map((seed) => ({
+            id: String(seed.id),
+            title: String(seed.title || ''),
+            artist: String(seed.artist || ''),
+            genre: String(seed.genre || ''),
+          }))
+          .slice(0, 25)
+      : [];
+    const moods = Array.isArray(survey.moods)
+      ? survey.moods.map((mood) => String(mood || '').trim()).filter(Boolean).slice(0, 12)
+      : [];
+    if (!seeds.length && !moods.length) return;
+    latestSurveyByUser.set(userId, {
+      seeds,
+      moods,
+      savedAt: Number.isFinite(Number(survey.savedAt)) ? Number(survey.savedAt) : Date.now(),
+    });
+  });
 }
 
 function ensureSocialUser(userId) {
@@ -419,6 +768,98 @@ async function searchTracks(query, limit = 20) {
     }));
 }
 
+const MOOD_QUERY_TEMPLATES = Object.freeze({
+  chill: ['chill vibes', 'lofi beats', 'ambient pop'],
+  hype: ['high energy rap', 'gym playlist', 'festival trap'],
+  sad: ['sad indie', 'heartbreak songs', 'melancholy pop'],
+  focus: ['focus instrumentals', 'study beats', 'deep concentration music'],
+  party: ['club bangers', 'dance pop hits', 'weekend pregame mix'],
+  romantic: ['rnb slow jams', 'love songs', 'romantic pop'],
+});
+
+function buildMoodQueries(moods) {
+  const queries = [];
+  moods.forEach((mood) => {
+    const normalized = String(mood || '').trim().toLowerCase();
+    const templates = MOOD_QUERY_TEMPLATES[normalized];
+    if (templates?.length) {
+      queries.push(...templates);
+    } else if (normalized) {
+      queries.push(`${normalized} music`);
+    }
+  });
+  return queries;
+}
+
+function normalizeTrackTitle(title) {
+  return String(title || '')
+    .toLowerCase()
+    .replace(/\(.*?\)|\[.*?\]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function limitTitleRepetition(tracks, maxPerTitle = 2) {
+  const titleCounts = new Map();
+  return tracks.filter((track) => {
+    const normalizedTitle = normalizeTrackTitle(track.title);
+    if (!normalizedTitle) return true;
+    const seen = titleCounts.get(normalizedTitle) || 0;
+    if (seen >= maxPerTitle) return false;
+    titleCounts.set(normalizedTitle, seen + 1);
+    return true;
+  });
+}
+
+async function searchTracksSafe(query, limit = 20) {
+  try {
+    return await searchTracks(query, limit);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`Track search failed for query "${query}":`, err?.message || err);
+    return [];
+  }
+}
+
+function buildOfflineFallbackFeed(userId, limit = 40) {
+  const candidates = [];
+  const pushTracks = (tracks) => {
+    (tracks || []).forEach((track) => {
+      if (!track || !track.id || !track.title || !track.artist || !track.previewUrl) return;
+      candidates.push({
+        id: String(track.id),
+        title: String(track.title || ''),
+        artist: String(track.artist || ''),
+        album: track.album ? String(track.album) : undefined,
+        artworkUrl: track.artworkUrl ? String(track.artworkUrl) : undefined,
+        previewUrl: String(track.previewUrl || ''),
+        genre: track.genre ? String(track.genre) : undefined,
+      });
+    });
+  };
+
+  pushTracks(socialLikes.get(userId) || []);
+  (socialFollows.get(userId) || new Set()).forEach((followedUserId) => {
+    pushTracks(socialLikes.get(followedUserId) || []);
+  });
+  for (const likes of socialLikes.values()) {
+    pushTracks(likes || []);
+  }
+
+  const deduped = new Map();
+  candidates.forEach((track) => {
+    const key = String(track.id || '').trim() || `${track.title}::${track.artist}`;
+    if (key && !deduped.has(key)) deduped.set(key, track);
+  });
+
+  const items = Array.from(deduped.values());
+  for (let i = items.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+  return limitTitleRepetition(items, 2).slice(0, limit);
+}
+
 // Search endpoint used by the survey UI to find seed songs
 app.get('/api/search', async (req, res) => {
   const query = String(req.query.q || '').trim();
@@ -436,7 +877,7 @@ app.get('/api/search', async (req, res) => {
 });
 
 // Save survey: list of seed tracks and selected moods/genres
-app.post('/api/survey', requireAuth, (req, res) => {
+app.post('/api/survey', requireAuth, async (req, res) => {
   const { seeds, moods } = req.body || {};
   const userId = req.authUserId;
   const normalizedSeeds = Array.isArray(seeds)
@@ -446,6 +887,7 @@ app.post('/api/survey', requireAuth, (req, res) => {
           id: String(seed.id),
           title: String(seed.title || ''),
           artist: String(seed.artist || ''),
+          genre: String(seed.genre || ''),
         }))
     : [];
   const normalizedMoods = Array.isArray(moods)
@@ -455,6 +897,7 @@ app.post('/api/survey', requireAuth, (req, res) => {
   if (!normalizedSeeds.length && !normalizedMoods.length) {
     // Empty submit means "use my listening history".
     latestSurveyByUser.delete(userId);
+    await persistSocialState();
     return res.json({ ok: true });
   }
 
@@ -463,6 +906,7 @@ app.post('/api/survey', requireAuth, (req, res) => {
     moods: normalizedMoods,
     savedAt: Date.now(),
   });
+  await persistSocialState();
   res.json({ ok: true });
 });
 
@@ -523,6 +967,7 @@ app.post('/api/account/register', async (req, res) => {
     passwordHash: hashPassword(cleanedPassword),
   });
   ensureSocialUser(userId);
+  await persistAccounts();
 
   const sessionToken = createSession(userId);
   return res.status(201).json({ user: toViewerAccount(socialProfiles.get(userId)), sessionToken });
@@ -541,6 +986,7 @@ app.post('/api/account/profile-photo', requireAuth, async (req, res) => {
   }
   profile.profileImageUrl = moderation.value;
   socialProfiles.set(userId, profile);
+  await persistAccounts();
   return res.json({ ok: true, user: toViewerAccount(profile) });
 });
 
@@ -583,12 +1029,13 @@ app.post('/api/account/logout', requireAuth, (req, res) => {
   return res.json({ ok: true });
 });
 
-app.post('/api/account/match-mode', requireAuth, (req, res) => {
+app.post('/api/account/match-mode', requireAuth, async (req, res) => {
   const { matchOpen } = req.body || {};
   const user = req.authUserId;
   const profile = socialProfiles.get(user);
   profile.matchOpen = Boolean(matchOpen);
   socialProfiles.set(user, profile);
+  await persistAccounts();
   return res.json({ ok: true, matchOpen: profile.matchOpen });
 });
 
@@ -611,25 +1058,29 @@ app.get('/api/feed', requireAuth, async (req, res) => {
 
     if (survey) {
       const { seeds, moods } = survey;
-      // Build some queries based on seed artists, titles, and optional moods.
+      const moodQueries = buildMoodQueries(moods);
+      const primaryVibeQuery = moodQueries[0] || '';
+      // Build queries from artist + genre with mood hints.
       seeds.forEach((s) => {
-        if (s.artist) baseQueries.push(s.artist);
-        if (s.title) baseQueries.push(`${s.title} remix`);
+        if (s.artist && primaryVibeQuery) baseQueries.push(`${s.artist} ${primaryVibeQuery}`);
+        else if (s.artist) baseQueries.push(s.artist);
+        if (s.genre && primaryVibeQuery) baseQueries.push(`${s.genre} ${primaryVibeQuery}`);
+        else if (s.genre) baseQueries.push(`${s.genre} mix`);
       });
-      moods.forEach((m) => baseQueries.push(m));
+      baseQueries.push(...moodQueries);
     } else {
       // If the user skipped survey choices, use previous likes as fallback.
       likedTracks.slice(0, 10).forEach((track) => {
         if (track.artist) baseQueries.push(track.artist);
-        if (track.title) baseQueries.push(`${track.title} similar`);
         if (track.genre) baseQueries.push(track.genre);
       });
     }
 
     if (baseQueries.length === 0) {
       // Final fallback for brand new users with no survey and no likes.
-      const fallback = await searchTracks('top hits', 20);
-      return res.json({ items: fallback });
+      const fallback = await searchTracksSafe('top hits', 20);
+      if (fallback.length) return res.json({ items: fallback });
+      return res.json({ items: buildOfflineFallbackFeed(userId, 20) });
     }
 
     const uniqueQueries = [...new Set(baseQueries.map((query) => query.trim()).filter(Boolean))];
@@ -637,7 +1088,7 @@ app.get('/api/feed', requireAuth, async (req, res) => {
 
     // For each query, grab a few tracks and dedupe by id.
     for (const q of uniqueQueries.slice(0, 6)) {
-      const tracks = await searchTracks(q, 10);
+      const tracks = await searchTracksSafe(q, 10);
       tracks.forEach((t) => {
         if (!uniqueTracks.has(t.id)) {
           uniqueTracks.set(t.id, t);
@@ -647,8 +1098,9 @@ app.get('/api/feed', requireAuth, async (req, res) => {
 
     // If recs came up empty, fall back to a generic query.
     if (!uniqueTracks.size) {
-      const fallback = await searchTracks('top hits', 20);
-      return res.json({ items: fallback });
+      const fallback = await searchTracksSafe('top hits', 20);
+      if (fallback.length) return res.json({ items: fallback });
+      return res.json({ items: buildOfflineFallbackFeed(userId, 20) });
     }
 
     // Shuffle for a TikTok-style feed feel.
@@ -658,11 +1110,12 @@ app.get('/api/feed', requireAuth, async (req, res) => {
       [items[i], items[j]] = [items[j], items[i]];
     }
 
-    res.json({ items });
+    const vibeBalancedItems = limitTitleRepetition(items, 2);
+    res.json({ items: vibeBalancedItems });
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('Feed endpoint error:', err);
-    res.status(500).json({ error: 'Failed to load feed' });
+    return res.json({ items: buildOfflineFallbackFeed(req.authUserId, 20) });
   }
 });
 
@@ -722,7 +1175,7 @@ app.get('/api/social/users', requireAuth, (req, res) => {
   res.json({ users });
 });
 
-app.post('/api/social/follow', requireAuth, (req, res) => {
+app.post('/api/social/follow', requireAuth, async (req, res) => {
   const { targetId, action } = req.body || {};
   const viewer = req.authUserId;
   const target = String(targetId || '').trim();
@@ -737,6 +1190,7 @@ app.post('/api/social/follow', requireAuth, (req, res) => {
   } else {
     following.add(target);
   }
+  await persistSocialState();
   const viewerProfile = socialProfiles.get(viewer);
   const targetProfile = socialProfiles.get(target);
   const targetFollowsViewer = socialFollows.get(target).has(viewer);
@@ -755,7 +1209,7 @@ app.post('/api/social/follow', requireAuth, (req, res) => {
   });
 });
 
-app.post('/api/social/like', requireAuth, (req, res) => {
+app.post('/api/social/like', requireAuth, async (req, res) => {
   const { track } = req.body || {};
   const user = req.authUserId;
   if (!user || !track || !track.id) {
@@ -775,6 +1229,7 @@ app.post('/api/social/like', requireAuth, (req, res) => {
       genre: track.genre ? String(track.genre) : undefined,
     });
     socialLikes.set(user, likes.slice(0, 50));
+    await persistSocialState();
   }
   return res.json({ ok: true, likedMusic: socialLikes.get(user) });
 });
@@ -797,7 +1252,7 @@ app.get('/api/social/messages', requireAuth, (req, res) => {
   return res.json({ messages });
 });
 
-app.post('/api/social/messages', requireAuth, (req, res) => {
+app.post('/api/social/messages', requireAuth, async (req, res) => {
   const { toId, text, track } = req.body || {};
   const sender = req.authUserId;
   const recipient = String(toId || '').trim();
@@ -849,6 +1304,7 @@ app.post('/api/social/messages', requireAuth, (req, res) => {
   if (socialMessages.length > 200) {
     socialMessages = socialMessages.slice(-200);
   }
+  await persistSocialState();
   return res.json({ ok: true, message });
 });
 
@@ -916,6 +1372,7 @@ app.post('/api/social/photo-posts', requireAuth, async (req, res) => {
   if (socialPhotoPosts.length > 400) {
     socialPhotoPosts = socialPhotoPosts.slice(0, 400);
   }
+  await persistSocialState();
   return res.status(201).json({
     ok: true,
     post: {
@@ -964,10 +1421,26 @@ app.get('/api/lyrics', async (req, res) => {
 
 initializeSeedPasswords();
 
-seedSocialLikes()
+loadPersistedAccounts()
   .catch((err) => {
     // eslint-disable-next-line no-console
-    console.error('Failed to seed social likes:', err);
+    console.error('Failed to load persisted accounts:', err);
+  })
+  .then(() =>
+    seedSocialLikes().catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error('Failed to seed social likes:', err);
+    })
+  )
+  .then(() =>
+    loadPersistedSocialState().catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error('Failed to load persisted social state:', err);
+    })
+  )
+  .catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error('Failed during startup initialization:', err);
   })
   .finally(() => {
     app.use('/api', (req, res) => {

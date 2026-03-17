@@ -25,6 +25,7 @@ type SurveySeed = {
   id: string
   title: string
   artist: string
+  genre?: string
 }
 
 type TimedLyricLine = {
@@ -428,6 +429,12 @@ function App() {
             window.localStorage.setItem(getSurveyStorageKey(viewer.id), '1')
             setStep('feed')
           }}
+          onSessionExpired={() => {
+            window.localStorage.removeItem(SESSION_STORAGE_KEY)
+            setSessionToken(null)
+            setViewer(null)
+            setStep('account')
+          }}
         />
       ) : (
         viewer && sessionToken && (
@@ -748,9 +755,10 @@ function AccountScreen({ onAuthSuccess }: AccountScreenProps) {
 type SurveyProps = {
   sessionToken: string
   onDone: () => void
+  onSessionExpired: () => void
 }
 
-function SurveyScreen({ sessionToken, onDone }: SurveyProps) {
+function SurveyScreen({ sessionToken, onDone, onSessionExpired }: SurveyProps) {
   const [query, setQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Track[]>([])
   const [loading, setLoading] = useState(false)
@@ -782,7 +790,7 @@ function SurveyScreen({ sessionToken, onDone }: SurveyProps) {
       if (exists) {
         return prev.filter((s) => s.id !== track.id)
       }
-      return [...prev, { id: track.id, title: track.title, artist: track.artist }]
+      return [...prev, { id: track.id, title: track.title, artist: track.artist, genre: track.genre }]
     })
   }
 
@@ -802,11 +810,16 @@ function SurveyScreen({ sessionToken, onDone }: SurveyProps) {
         body: JSON.stringify({ seeds: selected, moods }),
       })
       if (!res.ok) {
-        throw new Error('Survey submit failed')
+        if (res.status === 401) {
+          onSessionExpired()
+          throw new Error('Your session expired. Sign in again to save preferences.')
+        }
+        throw new Error(await readApiErrorMessage(res, 'Could not save your preferences. Try again.'))
       }
       onDone()
-    } catch {
-      setError('Could not save your preferences. Try again.')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not save your preferences. Try again.'
+      setError(message)
     } finally {
       setSubmitting(false)
     }
@@ -1433,11 +1446,18 @@ function FeedScreen({ viewer, sessionToken, onViewerUpdate, onSignOut }: FeedScr
         const res = await fetch(`${API_BASE}/api/feed`, {
           headers: authHeaders(sessionToken),
         })
-        if (!res.ok) throw new Error('Feed failed')
+        if (res.status === 401) {
+          onSignOut()
+          throw new Error('Your session expired. Sign in again.')
+        }
+        if (!res.ok) {
+          throw new Error(await readApiErrorMessage(res, 'Could not load your feed.'))
+        }
         const data = (await res.json()) as { items: Track[] }
         setItems(data.items)
-      } catch {
-        setError('Could not load your feed.')
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not load your feed.'
+        setError(message)
       } finally {
         setLoading(false)
       }
